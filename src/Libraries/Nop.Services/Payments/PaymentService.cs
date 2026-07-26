@@ -1,4 +1,5 @@
 ﻿using Nop.Core;
+using Nop.Core.Infrastructure;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Services.Catalog;
@@ -148,6 +149,12 @@ public partial class PaymentService : IPaymentService
             return decimal.Zero;
 
         var result = await paymentMethod.GetAdditionalHandlingFeeAsync(cart);
+
+        //apply registered payment method filters (no-op when none are registered)
+        foreach (var methodFilter in EngineContext.Current.ResolveAll<IPaymentMethodFilter>().OrderBy(f => f.Order))
+        {
+            result = await methodFilter.AdjustAdditionalHandlingFeeAsync(result, cart, paymentMethod);
+        }
         if (result < decimal.Zero)
             result = decimal.Zero;
 

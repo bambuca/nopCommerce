@@ -1,4 +1,5 @@
 ﻿using Nop.Core.Domain.Customers;
+using Nop.Core.Infrastructure;
 using Nop.Core.Domain.Payments;
 using Nop.Services.Configuration;
 using Nop.Services.Customers;
@@ -51,6 +52,12 @@ public partial class PaymentPluginManager : PluginManager<IPaymentMethod>, IPaym
         //filter by country
         if (countryId > 0)
             paymentMethods = await paymentMethods.WhereAwait(async method => !(await GetRestrictedCountryIdsAsync(method)).Contains(countryId)).ToListAsync();
+
+        //apply registered payment method filters (no-op when none are registered)
+        foreach (var methodFilter in EngineContext.Current.ResolveAll<IPaymentMethodFilter>().OrderBy(f => f.Order))
+        {
+            paymentMethods = await methodFilter.FilterPaymentMethodsAsync(paymentMethods, customer, storeId, countryId);
+        }
 
         return paymentMethods;
     }

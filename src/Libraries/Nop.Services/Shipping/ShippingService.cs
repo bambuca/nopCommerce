@@ -4,6 +4,7 @@ using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Shipping;
+using Nop.Core.Infrastructure;
 using Nop.Services.Attributes;
 using Nop.Services.Catalog;
 using Nop.Services.Common;
@@ -607,6 +608,21 @@ public partial class ShippingService : IShippingService
                     so.Rate = await _priceCalculationService.RoundPriceAsync(so.Rate);
                 result.ShippingOptions.Add(so);
             }
+        }
+
+        //apply registered shipping options filters (no-op when none are registered);
+        //intentionally before the error cleanup below, so that it decides over the final filtered set
+        var optionsFilters = EngineContext.Current.ResolveAll<IShippingOptionsFilter>().OrderBy(f => f.Order).ToList();
+        foreach (var optionsFilter in optionsFilters)
+        {
+            await optionsFilter.AdjustShippingOptionsAsync(result, cart, shippingAddress, customer, storeId);
+        }
+
+        //filters may have adjusted the rates - re-apply the rounding policy used when the options were loaded
+        if (optionsFilters.Count > 0 && _shoppingCartSettings.RoundPricesDuringCalculation)
+        {
+            foreach (var shippingOption in result.ShippingOptions)
+                shippingOption.Rate = await _priceCalculationService.RoundPriceAsync(shippingOption.Rate);
         }
 
         if (_shippingSettings.ReturnValidOptionsIfThereAreAny)

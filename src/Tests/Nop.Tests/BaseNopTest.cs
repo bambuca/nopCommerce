@@ -75,6 +75,8 @@ using Nop.Services.Shipping.Date;
 using Nop.Services.Shipping.Pickup;
 using Nop.Services.Stores;
 using Nop.Services.Tax;
+using Nop.Tests.Nop.Services.Tests.Payments;
+using Nop.Tests.Nop.Services.Tests.Shipping;
 using Nop.Services.Themes;
 using Nop.Services.Topics;
 using Nop.Services.Vendors;
@@ -370,6 +372,11 @@ public partial class BaseNopTest
         services.AddTransient<IUrlRecordService, UrlRecordService>();
         services.AddTransient<IShipmentService, ShipmentService>();
         services.AddTransient<IShippingService, ShippingService>();
+
+        //configurable no-op doubles for the checkout filter seams
+        services.AddTransient<IShippingOptionsFilter, TestShippingOptionsFilterAlpha>();
+        services.AddTransient<IShippingOptionsFilter, TestShippingOptionsFilterBeta>();
+        services.AddTransient<IPaymentMethodFilter, TestPaymentMethodFilter>();
         services.AddTransient<IWarehouseService, WarehouseService>();
         services.AddTransient<IShippingMethodsService, ShippingMethodsService>();
         services.AddTransient<IDateRangeService, DateRangeService>();

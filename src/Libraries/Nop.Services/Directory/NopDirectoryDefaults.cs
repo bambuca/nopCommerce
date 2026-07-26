@@ -83,4 +83,14 @@ public static partial class NopDirectoryDefaults
     #endregion
 
     #endregion
+
+    #region Geo lookup
+
+    /// <summary>
+    /// Path (relative to the content root) of the MaxMind GeoLite2 country database used by
+    /// <see cref="GeoLookupService"/>.
+    /// </summary>
+    public static string GeoLiteCountryDatabasePath => "~/App_Data/GeoLite2-Country.mmdb";
+
+    #endregion
 }

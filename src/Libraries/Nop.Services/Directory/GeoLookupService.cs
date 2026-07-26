@@ -14,12 +14,22 @@ namespace Nop.Services.Directory;
 /// <summary>
 /// GEO lookup service
 /// </summary>
-public partial class GeoLookupService : IGeoLookupService
+/// <remarks>
+/// Registered as a singleton (see <c>NopStartup</c>) so the underlying
+/// <see cref="DatabaseReader"/> is created once and reused for the lifetime of the application.
+/// MaxMind's <see cref="DatabaseReader"/> is documented as thread-safe and designed for reuse;
+/// per-call instantiation leaks a memory-mapped file handle until the finalizer runs, which under
+/// load is too slow and exhausts the process file descriptor limit.
+/// </remarks>
+public partial class GeoLookupService : IGeoLookupService, IDisposable
 {
     #region Fields
 
     protected readonly ILogger _logger;
     protected readonly INopFileProvider _fileProvider;
+
+    private readonly Lazy<DatabaseReader> _reader;
+    private bool _disposed;
 
     #endregion
 
@@ -30,11 +40,24 @@ public partial class GeoLookupService : IGeoLookupService
     {
         _logger = logger;
         _fileProvider = fileProvider;
+        _reader = new Lazy<DatabaseReader>(CreateReader, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     #endregion
 
     #region Utilities
+
+    /// <summary>
+    /// Create the underlying MaxMind reader. Factored out so subclasses (and tests) can override
+    /// the database location without re-implementing the lifecycle.
+    /// </summary>
+    /// <returns>Database reader</returns>
+    protected virtual DatabaseReader CreateReader()
+    {
+        //This product includes GeoLite2 data created by MaxMind, available from http://www.maxmind.com
+        var databasePath = _fileProvider.MapPath(NopDirectoryDefaults.GeoLiteCountryDatabasePath);
+        return new DatabaseReader(databasePath);
+    }
 
     /// <summary>
     /// Get information
@@ -48,13 +71,7 @@ public partial class GeoLookupService : IGeoLookupService
 
         try
         {
-            //This product includes GeoLite2 data created by MaxMind, available from http://www.maxmind.com
-            var databasePath = _fileProvider.MapPath("~/App_Data/GeoLite2-Country.mmdb");
-            var reader = new DatabaseReader(databasePath);
-            var omni = reader.Country(ipAddress);
-
-            return omni;
-                
+            return _reader.Value.Country(ipAddress);
         }
         //catch (AddressNotFoundException exc)
         catch (GeoIP2Exception)
@@ -101,6 +118,27 @@ public partial class GeoLookupService : IGeoLookupService
             return response.Country.Name;
 
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Dispose GEO lookup service
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    // Protected implementation of Dispose pattern.
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+            return;
+
+        if (disposing && _reader.IsValueCreated)
+            _reader.Value.Dispose();
+
+        _disposed = true;
     }
 
     #endregion

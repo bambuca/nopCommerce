@@ -170,7 +170,10 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IAclService, AclService>();
         services.AddScoped<IPriceCalculationService, PriceCalculationService>();
-        services.AddScoped<IGeoLookupService, GeoLookupService>();
+        //registered as a singleton so the underlying MaxMind DatabaseReader (a memory-mapped file handle)
+        //is created once and shared; per-request instantiation leaks the handle until the finalizer runs,
+        //which under load exhausts the process file descriptor limit
+        services.AddSingleton<IGeoLookupService, GeoLookupService>();
         services.AddScoped<ICountryService, CountryService>();
         services.AddScoped<ICurrencyService, CurrencyService>();
         services.AddScoped<IMeasureService, MeasureService>();

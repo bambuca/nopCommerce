@@ -1,4 +1,4 @@
-@model AppSettingsModel
+﻿@model AppSettingsModel
 
 <div class="card-body">
     <div class="form-group row">
@@ -47,5 +47,23 @@
                 <span asp-validation-for="HostingConfigModel.KnownNetworks"></span>
             </div>
         </div>
+        <div class="form-group row advanced-setting">
+            <div class="col-md-3">
+                <nop-label asp-for="HostingConfigModel.UseForwardedPrefix" />
+            </div>
+            <div class="col-md-9">
+                <nop-editor asp-for="HostingConfigModel.UseForwardedPrefix" />
+                <span asp-validation-for="HostingConfigModel.UseForwardedPrefix"></span>
+            </div>
+        </div>
     </nop-nested-setting>
+    <div class="form-group row">
+        <div class="col-md-3">
+            <nop-label asp-for="HostingConfigModel.PathBase" />
+        </div>
+        <div class="col-md-9">
+            <nop-editor asp-for="HostingConfigModel.PathBase" />
+            <span asp-validation-for="HostingConfigModel.PathBase"></span>
+        </div>
+    </div>
 </div>

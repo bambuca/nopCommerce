@@ -4923,6 +4923,27 @@
   <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.KnownNetworks.Hint">
     <Value>Specify a list of IP CIDR notations (comma separated) to accept forwarded headers. e.g. 172.64.0.0/13,162.158.0.0/15</Value>
   </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.PathBase">
+    <Value>Path base</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.PathBase.Hint">
+    <Value>Specify a custom path base the store is hosted under, for example "/shop". Leave empty when the store is hosted at the root of the host.</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.PathBase.Invalid">
+    <Value>The path base has to start with "/" and must not contain a query string or a fragment.</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix">
+    <Value>Take the path base from the proxy</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix.Hint">
+    <Value>Enable this setting to take the path base from the "X-Forwarded-Prefix" header instead of the "Path base" setting. Use it when the reverse proxy strips the prefix before forwarding the request. It requires the addresses of known proxies or networks to be specified - without them the source of the header cannot be verified, so the header is ignored.</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix.RequiresProxy">
+    <Value>Taking the path base from the proxy requires the use of proxy servers to be enabled.</Value>
+  </LocaleResource>
+  <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix.RequiresKnownProxies">
+    <Value>Taking the path base from the proxy requires the addresses of known proxies or known proxy networks to be specified, otherwise the header cannot be trusted.</Value>
+  </LocaleResource>
   <LocaleResource Name="Admin.Configuration.AppSettings.Hosting.UseProxy">
     <Value>Use proxy servers</Value>
   </LocaleResource>

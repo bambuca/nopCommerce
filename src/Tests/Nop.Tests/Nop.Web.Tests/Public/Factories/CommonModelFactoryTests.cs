@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using Microsoft.AspNetCore.Http;
+using FluentAssertions;
 using Nop.Core;
 using Nop.Core.Domain;
 using Nop.Core.Domain.Common;
@@ -246,5 +247,24 @@ public class CommonModelFactoryTests : BaseNopTest
         model.Should().NotBeNullOrEmpty();
 
         model.Trim().Split(Environment.NewLine).Length.Should().Be(165);
+    }
+
+    [Test]
+    public async Task CanPrepareRobotsTextFileWithPathBase()
+    {
+        //a store hosted under a path base must get its relative rule paths prefixed
+        var accessor = GetService<IHttpContextAccessor>();
+        accessor.HttpContext.Request.PathBase = "/shop";
+        try
+        {
+            var model = await _commonModelFactory.PrepareRobotsTextFileAsync();
+
+            model.Should().Contain("Disallow: /shop/");
+            model.Should().NotContain($"Disallow: /admin{Environment.NewLine}");
+        }
+        finally
+        {
+            accessor.HttpContext.Request.PathBase = PathString.Empty;
+        }
     }
 }

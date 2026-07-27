@@ -1,6 +1,8 @@
 ﻿using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Html;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Razor.TagHelpers;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.Routing;
@@ -9,6 +11,7 @@ using Microsoft.AspNetCore.Razor.TagHelpers;
 using Microsoft.Extensions.Hosting;
 using Nop.Core;
 using Nop.Core.Configuration;
+using Nop.Services.Localization;
 using Nop.Web.Framework.Extensions;
 using Nop.Web.Framework.UI;
 using Nop.Web.Framework.WebOptimizer;
@@ -34,6 +37,7 @@ public partial class NopScriptTagHelper : UrlResolutionTagHelper
     #region Fields
 
     protected readonly AppSettings _appSettings;
+    protected readonly IActionContextAccessor _actionContextAccessor;
     protected readonly INopAssetHelper _bundleHelper;
     protected readonly INopHtmlHelper _nopHtmlHelper;
     protected readonly IWebHelper _webHelper;
@@ -49,8 +53,10 @@ public partial class NopScriptTagHelper : UrlResolutionTagHelper
         INopHtmlHelper nopHtmlHelper,
         IUrlHelperFactory urlHelperFactory,
         IWebHelper webHelper,
-        IWebHostEnvironment webHostEnvironment) : base(urlHelperFactory, htmlEncoder)
+        IWebHostEnvironment webHostEnvironment,
+        IActionContextAccessor actionContextAccessor) : base(urlHelperFactory, htmlEncoder)
     {
+        _actionContextAccessor = actionContextAccessor;
         _appSettings = appSettings;
         _bundleHelper = bundleHelper;
         _nopHtmlHelper = nopHtmlHelper;
@@ -109,8 +115,13 @@ public partial class NopScriptTagHelper : UrlResolutionTagHelper
             return;
         }
 
-        var asset = _bundleHelper.GetOrCreateJavaScriptAsset(Src, [Src]);
-        output.Attributes.SetAttribute(SRC_ATTRIBUTE_NAME, _bundleHelper.CacheBusting(asset));
+        //the asset is keyed by the path without the path base, and the rendered src gets it back,
+        //so that a store hosted under a path base does not bundle the same file twice
+        var pathBase = _actionContextAccessor.ActionContext?.HttpContext.Request.PathBase ?? PathString.Empty;
+
+        var src = urlHelper.Content(Src).RemoveApplicationPathFromRawUrl(pathBase);
+        var asset = _bundleHelper.GetOrCreateJavaScriptAsset(src, [src]);
+        output.Attributes.SetAttribute(SRC_ATTRIBUTE_NAME, $"{pathBase}{_bundleHelper.CacheBusting(asset)}");
     }
 
     #endregion

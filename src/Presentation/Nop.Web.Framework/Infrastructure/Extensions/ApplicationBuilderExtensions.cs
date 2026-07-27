@@ -487,53 +487,77 @@ public static class ApplicationBuilderExtensions
 
         if (hostingConfig.UseProxy)
         {
-            var options = new ForwardedHeadersOptions
-            {
-                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-                // IIS already serves as a reverse proxy and will add X-Forwarded headers to all requests,
-                // so we need to increase this limit, otherwise, passed forwarding headers will be ignored.
-                ForwardLimit = 2
-            };
-
-            if (!string.IsNullOrEmpty(hostingConfig.ForwardedForHeaderName))
-                options.ForwardedForHeaderName = hostingConfig.ForwardedForHeaderName;
-
-            if (!string.IsNullOrEmpty(hostingConfig.ForwardedProtoHeaderName))
-                options.ForwardedProtoHeaderName = hostingConfig.ForwardedProtoHeaderName;
-
-            options.KnownNetworks.Clear();
-            options.KnownProxies.Clear();
-
-            if (!string.IsNullOrEmpty(hostingConfig.KnownProxies))
-            {
-                foreach (var strIp in hostingConfig.KnownProxies.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList())
-                {
-                    if (IPAddress.TryParse(strIp, out var ip))
-                        options.KnownProxies.Add(ip);
-                }
-            }
-
-            if (!string.IsNullOrEmpty(hostingConfig.KnownNetworks))
-            {
-                foreach (var strIpNet in hostingConfig.KnownNetworks.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList())
-                {
-                    var ipNetParts = strIpNet.Split("/");
-                    if (ipNetParts.Length == 2)
-                    {
-                        if (IPAddress.TryParse(ipNetParts[0], out var ip) && int.TryParse(ipNetParts[1], out var length))
-                            options.KnownNetworks.Add(new IPNetwork(ip, length));
-                    }
-                }
-            }
-
-            if (options.KnownProxies.Count > 1 || options.KnownNetworks.Count > 1)
-                options.ForwardLimit = null; //disable the limit, because KnownProxies is configured
+            var options = BuildForwardedHeadersOptions(hostingConfig);
 
             //configure forwarding
             application.UseForwardedHeaders(options);
         }
     }
 
+    /// <summary>
+    /// Build the forwarded headers options out of the hosting configuration
+    /// </summary>
+    /// <param name="hostingConfig">Hosting configuration</param>
+    /// <returns>Forwarded headers options</returns>
+    /// <remarks>
+    /// "X-Forwarded-Prefix" is only accepted when the source of the headers is restricted to the known
+    /// proxies or networks - the middleware verifies the remote address only while at least one of them
+    /// is configured, so enabling the flag without them would let any caller reaching the application
+    /// directly dictate its path base, and with it the generated URLs.
+    /// </remarks>
+    public static ForwardedHeadersOptions BuildForwardedHeadersOptions(HostingConfig hostingConfig)
+    {
+        ArgumentNullException.ThrowIfNull(hostingConfig);
+
+        var options = new ForwardedHeadersOptions
+        {
+            ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+            // IIS already serves as a reverse proxy and will add X-Forwarded headers to all requests,
+            // so we need to increase this limit, otherwise, passed forwarding headers will be ignored.
+            ForwardLimit = 2
+        };
+
+        if (!string.IsNullOrEmpty(hostingConfig.ForwardedForHeaderName))
+            options.ForwardedForHeaderName = hostingConfig.ForwardedForHeaderName;
+
+        if (!string.IsNullOrEmpty(hostingConfig.ForwardedProtoHeaderName))
+            options.ForwardedProtoHeaderName = hostingConfig.ForwardedProtoHeaderName;
+
+        options.KnownNetworks.Clear();
+        options.KnownProxies.Clear();
+
+        if (!string.IsNullOrEmpty(hostingConfig.KnownProxies))
+        {
+            foreach (var strIp in hostingConfig.KnownProxies.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList())
+            {
+                if (IPAddress.TryParse(strIp, out var ip))
+                    options.KnownProxies.Add(ip);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(hostingConfig.KnownNetworks))
+        {
+            foreach (var strIpNet in hostingConfig.KnownNetworks.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList())
+            {
+                var ipNetParts = strIpNet.Split("/");
+                if (ipNetParts.Length == 2)
+                {
+                    if (IPAddress.TryParse(ipNetParts[0], out var ip) && int.TryParse(ipNetParts[1], out var length))
+                        options.KnownNetworks.Add(new IPNetwork(ip, length));
+                }
+            }
+        }
+
+        if (options.KnownProxies.Count > 1 || options.KnownNetworks.Count > 1)
+            options.ForwardLimit = null; //disable the limit, because KnownProxies is configured
+
+        //let the reverse proxy own the path base: the middleware moves the header into Request.PathBase
+        //per request, so the prefix does not have to be duplicated in the app settings
+        if (hostingConfig.UseForwardedPrefix && (options.KnownProxies.Count > 0 || options.KnownNetworks.Count > 0))
+            options.ForwardedHeaders |= ForwardedHeaders.XForwardedPrefix;
+
+        return options;
+    }
     /// <summary>
     /// Configure WebMarkupMin
     /// </summary>

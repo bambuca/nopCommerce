@@ -183,6 +183,60 @@ public partial class CommonModelFactory : ICommonModelFactory
         return result;
     }
 
+    /// <summary>
+    /// Prefix relative rule paths in robots.txt content with the application path base, so that
+    /// a store hosted under a path base (e.g. https://host/pl/) serves rules matching its actual
+    /// crawl paths. With an empty path base the content is returned unchanged
+    /// </summary>
+    /// <param name="content">Generated robots.txt content</param>
+    /// <param name="pathBase">Application path base (e.g. "/pl"); empty or "/" leaves content untouched</param>
+    /// <returns>robots.txt content valid for the path-base-hosted store</returns>
+    protected virtual string ApplyRobotsTxtPathBase(string content, string pathBase)
+    {
+        if (string.IsNullOrEmpty(content) || string.IsNullOrEmpty(pathBase) || pathBase == "/")
+            return content;
+
+        pathBase = "/" + pathBase.Trim('/');
+
+        var sb = new StringBuilder(content.Length + 256);
+        using var reader = new StringReader(content);
+        while (reader.ReadLine() is { } line)
+            sb.AppendLine(ApplyRobotsTxtPathBaseToLine(line, pathBase));
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Apply the path base prefix to a single robots.txt line ("Disallow:"/"Allow:" rules with
+    /// a relative path only)
+    /// </summary>
+    /// <param name="line">robots.txt line</param>
+    /// <param name="pathBase">Normalized application path base (e.g. "/pl")</param>
+    /// <returns>Adjusted line</returns>
+    protected virtual string ApplyRobotsTxtPathBaseToLine(string line, string pathBase)
+    {
+        var separatorIndex = line.IndexOf(':');
+        if (separatorIndex <= 0)
+            return line;
+
+        var field = line[..separatorIndex].Trim();
+        if (!field.Equals("Disallow", StringComparison.OrdinalIgnoreCase) &&
+            !field.Equals("Allow", StringComparison.OrdinalIgnoreCase))
+            return line;
+
+        var value = line[(separatorIndex + 1)..].Trim();
+
+        //only relative paths get the prefix; an empty value ("Disallow:" = allow all) stays as is.
+        //Skip already prefixed paths so the transformation is idempotent (e.g. hand-written
+        //additions that already contain the path base)
+        if (!value.StartsWith('/') ||
+            value.Equals(pathBase, StringComparison.Ordinal) ||
+            value.StartsWith(pathBase + "/", StringComparison.Ordinal))
+            return line;
+
+        return $"{line[..separatorIndex]}: {pathBase}{value}";
+    }
+
     #endregion
 
     #region Methods
@@ -586,6 +640,13 @@ public partial class CommonModelFactory : ICommonModelFactory
 
             foreach (var additionsRule in _robotsTxtSettings.AdditionsRules)
                 sb.AppendLine(additionsRule);
+
+            //a store hosted under a path base needs the relative rule paths prefixed,
+            //otherwise the rules point outside of the store's crawl space; applied to the
+            //generated rules only, the file based content below stays verbatim
+            var content = ApplyRobotsTxtPathBase(sb.ToString(),
+                _httpContextAccessor.HttpContext?.Request.PathBase.Value);
+            sb = new StringBuilder(content);
 
             //load and add robots.txt additions to the end of file.
             var robotsAdditionsFile = _fileProvider.Combine(_fileProvider.MapPath("~/wwwroot"), RobotsTxtDefaults.RobotsAdditionsFileName);

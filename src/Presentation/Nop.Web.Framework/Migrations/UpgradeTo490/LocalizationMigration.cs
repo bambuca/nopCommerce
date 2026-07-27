@@ -682,6 +682,15 @@ public class LocalizationMigration : MigrationBase
             ["Products.CompatibleWith.Items"] = "{0} items are compatible with this product",
             ["Search.FilterLevelValues"] = "Search by Year Make Model",
 
+
+            //path base support
+            ["Admin.Configuration.AppSettings.Hosting.PathBase"] = "Path base",
+            ["Admin.Configuration.AppSettings.Hosting.PathBase.Hint"] = "Specify a custom path base the store is hosted under, for example \"/shop\". Leave empty when the store is hosted at the root of the host.",
+            ["Admin.Configuration.AppSettings.Hosting.PathBase.Invalid"] = "The path base has to start with \"/\" and must not contain a query string or a fragment.",
+            ["Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix"] = "Take the path base from the proxy",
+            ["Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix.Hint"] = "Enable this setting to take the path base from the \"X-Forwarded-Prefix\" header instead of the \"Path base\" setting. Use it when the reverse proxy strips the prefix before forwarding the request. It requires the addresses of known proxies or networks to be specified - without them the source of the header cannot be verified, so the header is ignored.",
+            ["Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix.RequiresProxy"] = "Taking the path base from the proxy requires the use of proxy servers to be enabled.",
+            ["Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix.RequiresKnownProxies"] = "Taking the path base from the proxy requires the addresses of known proxies or known proxy networks to be specified, otherwise the header cannot be trusted.",
         }, languageId);
 
         #endregion

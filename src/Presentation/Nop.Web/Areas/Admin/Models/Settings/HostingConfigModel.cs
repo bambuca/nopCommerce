@@ -25,5 +25,11 @@ public partial record HostingConfigModel : BaseNopModel, IConfigModel
     [NopResourceDisplayName("Admin.Configuration.AppSettings.Hosting.KnownNetworks")]
     public string KnownNetworks { get; set; }
 
+    [NopResourceDisplayName("Admin.Configuration.AppSettings.Hosting.UseForwardedPrefix")]
+    public bool UseForwardedPrefix { get; set; }
+
+    [NopResourceDisplayName("Admin.Configuration.AppSettings.Hosting.PathBase")]
+    public string PathBase { get; set; } = "";
+
     #endregion
 }

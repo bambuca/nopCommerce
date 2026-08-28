@@ -1486,6 +1486,7 @@ public partial class InstallationService
             DisplayAllPicturesOnCatalogPages = false,
             ProductUrlStructureTypeId = (int)ProductUrlStructureType.Product,
             ActiveSearchProviderSystemName = string.Empty,
+            ActiveCatalogListingProviderSystemName = string.Empty,
             UseStandardSearchWhenSearchProviderThrowsException = true
         });
 

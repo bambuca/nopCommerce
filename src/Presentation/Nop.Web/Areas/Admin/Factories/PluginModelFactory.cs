@@ -36,6 +36,7 @@ public partial class PluginModelFactory : IPluginModelFactory
     protected readonly IPaymentPluginManager _paymentPluginManager;
     protected readonly IPickupPluginManager _pickupPluginManager;
     protected readonly IPluginService _pluginService;
+    protected readonly ICatalogListingPluginManager _catalogListingPluginManager;
     protected readonly ISearchPluginManager _searchPluginManager;
     protected readonly IShippingPluginManager _shippingPluginManager;
     protected readonly IStaticCacheManager _staticCacheManager;
@@ -57,6 +58,7 @@ public partial class PluginModelFactory : IPluginModelFactory
         IPaymentPluginManager paymentPluginManager,
         IPickupPluginManager pickupPluginManager,
         IPluginService pluginService,
+        ICatalogListingPluginManager catalogListingPluginManager,
         ISearchPluginManager searchPluginManager,
         IShippingPluginManager shippingPluginManager,
         IStaticCacheManager staticCacheManager,
@@ -74,6 +76,7 @@ public partial class PluginModelFactory : IPluginModelFactory
         _paymentPluginManager = paymentPluginManager;
         _pickupPluginManager = pickupPluginManager;
         _pluginService = pluginService;
+        _catalogListingPluginManager = catalogListingPluginManager;
         _searchPluginManager = searchPluginManager;
         _shippingPluginManager = shippingPluginManager;
         _staticCacheManager = staticCacheManager;
@@ -136,6 +139,10 @@ public partial class PluginModelFactory : IPluginModelFactory
 
             case ISearchProvider searchProvider:
                 model.IsEnabled = _searchPluginManager.IsPluginActive(searchProvider);
+                break;
+
+            case ICatalogListingProvider catalogListingProvider:
+                model.IsEnabled = _catalogListingPluginManager.IsPluginActive(catalogListingProvider);
                 break;
 
             case IWidgetPlugin widgetPlugin:

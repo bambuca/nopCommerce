@@ -414,6 +414,7 @@ public partial class BaseNopTest
         services.AddTransient<IShippingPluginManager, ShippingPluginManager>();
         services.AddTransient<ITaxPluginManager, TaxPluginManager>();
         services.AddScoped<ISearchPluginManager, SearchPluginManager>();
+        services.AddScoped<ICatalogListingPluginManager, CatalogListingPluginManager>();
 
         //picture thumb service
         services.AddScoped<IThumbService, ThumbService>();

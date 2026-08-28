@@ -267,6 +267,7 @@ public partial class NopStartup : INopStartup
         services.AddScoped<IShippingPluginManager, ShippingPluginManager>();
         services.AddScoped<ITaxPluginManager, TaxPluginManager>();
         services.AddScoped<ISearchPluginManager, SearchPluginManager>();
+        services.AddScoped<ICatalogListingPluginManager, CatalogListingPluginManager>();
 
         services.AddSingleton<IActionContextAccessor, ActionContextAccessor>();
 

@@ -596,6 +596,11 @@ public partial class CatalogSettings : ISettings
     public string ActiveSearchProviderSystemName { get; set; }
 
     /// <summary>
+    /// Gets or sets an system name of active catalog listing provider
+    /// </summary>
+    public string ActiveCatalogListingProviderSystemName { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether standard search will be used when the search provider throws an exception
     /// </summary>
     public bool UseStandardSearchWhenSearchProviderThrowsException { get; set; }

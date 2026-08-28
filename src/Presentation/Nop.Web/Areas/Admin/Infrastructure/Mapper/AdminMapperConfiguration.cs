@@ -439,6 +439,7 @@ public partial class AdminMapperConfiguration : Profile, IOrderedMapperProfile
             .ForMember(settings => settings.UseLinksInRequiredProductWarnings, options => options.Ignore())
             .ForMember(settings => settings.UseStandardSearchWhenSearchProviderThrowsException, options => options.Ignore())
             .ForMember(settings => settings.ActiveSearchProviderSystemName, options => options.Ignore())
+            .ForMember(settings => settings.ActiveCatalogListingProviderSystemName, options => options.Ignore())
             .ForMember(settings => settings.VendorProductReviewsPageSize, options => options.Ignore());        
 
         CreateMap<ProductCategory, CategoryProductModel>()

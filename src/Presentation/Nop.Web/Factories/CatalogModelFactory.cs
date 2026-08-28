@@ -35,6 +35,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
     protected readonly CatalogSettings _catalogSettings;
     protected readonly CustomerSettings _customerSettings;
     protected readonly ForumSettings _forumSettings;
+    protected readonly ICatalogListingPluginManager _catalogListingPluginManager;
     protected readonly ICategoryService _categoryService;
     protected readonly ICategoryTemplateService _categoryTemplateService;
     protected readonly ICurrencyService _currencyService;
@@ -73,6 +74,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
     public CatalogModelFactory(CatalogSettings catalogSettings,
         CustomerSettings customerSettings,
         ForumSettings forumSettings,
+        ICatalogListingPluginManager catalogListingPluginManager,
         ICategoryService categoryService,
         ICategoryTemplateService categoryTemplateService,
         ICurrencyService currencyService,
@@ -106,6 +108,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
         _catalogSettings = catalogSettings;
         _customerSettings = customerSettings;
         _forumSettings = forumSettings;
+        _catalogListingPluginManager = catalogListingPluginManager;
         _categoryService = categoryService;
         _categoryTemplateService = categoryTemplateService;
         _currencyService = currencyService;
@@ -183,15 +186,45 @@ public partial class CatalogModelFactory : ICatalogModelFactory
     }
 
     /// <summary>
-    /// Prepares the specification filter model
+    /// Asks the active catalog listing provider, if any, to answer the listing
     /// </summary>
-    /// <param name="selectedOptions">The selected options to filter the products</param>
-    /// <param name="availableOptions">The available options to filter the products</param>
+    /// <param name="request">Request describing the listing to prepare</param>
     /// <returns>
     /// A task that represents the asynchronous operation
-    /// The task result contains the specification filter model
+    /// The task result contains the listing, or null when no provider is active or the active one failed
     /// </returns>
-    protected virtual async Task<SpecificationFilterModel> PrepareSpecificationFilterModel(IList<int> selectedOptions, IList<SpecificationAttributeOption> availableOptions)
+    protected virtual async Task<CatalogListingResult> GetProvidedListingAsync(CatalogListingRequest request)
+    {
+        //nothing here runs on a store that has not configured a provider
+        if (string.IsNullOrEmpty(_catalogSettings.ActiveCatalogListingProviderSystemName))
+            return null;
+
+        var customer = await _workContext.GetCurrentCustomerAsync();
+        var provider = await _catalogListingPluginManager.LoadPrimaryPluginAsync(customer, request.StoreId);
+
+        if (provider is null)
+            return null;
+
+        try
+        {
+            return await provider.GetListingAsync(request);
+        }
+        catch
+        {
+            //a listing provider that fails is simply not consulted; every part of the listing it
+            //would have answered is queried by nopCommerce below, so the page still renders
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Prepares the specification filter model
+    /// </summary>
+    /// <param name="selectedOptions">Identifiers of the options selected by the customer</param>
+    /// <param name="availableOptions">Options to offer</param>
+    /// <param name="productCounts">Number of products behind each option, keyed by the option identifier; null when unknown</param>
+    /// <returns>The specification filter</returns>
+    protected virtual async Task<SpecificationFilterModel> PrepareSpecificationFilterModel(IList<int> selectedOptions, IList<SpecificationAttributeOption> availableOptions, IDictionary<int, int> productCounts = null)
     {
         var model = new SpecificationFilterModel();
 
@@ -223,7 +256,10 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     Name = await _localizationService
                         .GetLocalizedAsync(option, x => x.Name, workingLanguage.Id),
                     Selected = selectedOptions?.Any(optionId => optionId == option.Id) == true,
-                    ColorSquaresRgb = option.ColorSquaresRgb
+                    ColorSquaresRgb = option.ColorSquaresRgb,
+                    ProductCount = productCounts is not null && productCounts.TryGetValue(option.Id, out var productCount)
+                        ? productCount
+                        : null
                 });
             }
         }
@@ -236,17 +272,21 @@ public partial class CatalogModelFactory : ICatalogModelFactory
     /// </summary>
     /// <param name="selectedManufacturers">The selected manufacturers to filter the products</param>
     /// <param name="availableManufacturers">The available manufacturers to filter the products</param>
+    /// <param name="productCounts">Number of products behind each manufacturer, keyed by the manufacturer identifier; null when unknown</param>
     /// <returns>
     /// A task that represents the asynchronous operation
     /// The task result contains the specification filter model
     /// </returns>
-    protected virtual async Task<ManufacturerFilterModel> PrepareManufacturerFilterModel(IList<int> selectedManufacturers, IList<Manufacturer> availableManufacturers)
+    protected virtual async Task<ManufacturerFilterModel> PrepareManufacturerFilterModel(IList<int> selectedManufacturers, IList<Manufacturer> availableManufacturers, IDictionary<int, int> productCounts = null)
     {
         var model = new ManufacturerFilterModel();
 
         if (availableManufacturers?.Any() == true)
         {
             model.Enabled = true;
+
+            if (productCounts is not null)
+                model.ProductCounts = productCounts;
 
             var workingLanguage = await _workContext.GetWorkingLanguageAsync();
 
@@ -738,13 +778,48 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             categoryIds.AddRange(await _categoryService.GetChildCategoryIdsAsync(category.Id, currentStore.Id));
 
         //price range
-        PriceRangeModel selectedPriceRange = null;
-        if (_catalogSettings.EnablePriceRangeFiltering && category.PriceRangeFiltering)
-        {
-            selectedPriceRange = await GetConvertedPriceRangeAsync(command);
+        var priceRangeFiltering = _catalogSettings.EnablePriceRangeFiltering && category.PriceRangeFiltering;
+        var selectedPriceRange = priceRangeFiltering ? await GetConvertedPriceRangeAsync(command) : null;
 
-            PriceRangeModel availablePriceRange = null;
-            if (!category.ManuallyPriceRange)
+        //an active catalog listing provider answers the whole listing at once; whatever it leaves
+        //out is queried below exactly as it is when no provider is active
+        var listing = await GetProvidedListingAsync(new CatalogListingRequest
+        {
+            ListingType = CatalogListingType.Category,
+            CategoryIds = categoryIds,
+            ManufacturerIds = command.Ms,
+            StoreId = currentStore.Id,
+            LanguageId = (await _workContext.GetWorkingLanguageAsync()).Id,
+            SelectedSpecificationOptionIds = command.Specs,
+            PriceMin = selectedPriceRange?.From,
+            PriceMax = selectedPriceRange?.To,
+            OrderBy = (ProductSortingEnum)command.OrderBy,
+            PageIndex = command.PageNumber - 1,
+            PageSize = command.PageSize,
+            VisibleIndividuallyOnly = true,
+            ExcludeFeaturedProducts = !_catalogSettings.IgnoreFeaturedProducts && !_catalogSettings.IncludeFeaturedProductsInNormalLists
+        });
+
+        if (priceRangeFiltering)
+        {
+            PriceRangeModel availablePriceRange;
+            if (category.ManuallyPriceRange)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = category.PriceFrom,
+                    To = category.PriceTo
+                };
+            }
+            else if (listing?.AvailablePriceRange is not null)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = listing.AvailablePriceRange.From,
+                    To = listing.AvailablePriceRange.To
+                };
+            }
+            else
             {
                 async Task<decimal?> getProductPriceAsync(ProductSortingEnum orderBy)
                 {
@@ -764,39 +839,35 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     To = await getProductPriceAsync(ProductSortingEnum.PriceDesc)
                 };
             }
-            else
-            {
-                availablePriceRange = new PriceRangeModel
-                {
-                    From = category.PriceFrom,
-                    To = category.PriceTo
-                };
-            }
 
             model.PriceRangeFilter = await PreparePriceRangeFilterAsync(selectedPriceRange, availablePriceRange);
         }
 
         //filterable options
-        var filterableOptions = await _specificationAttributeService
-            .GetFiltrableSpecificationAttributeOptionsByCategoryIdAsync(category.Id);
+        var filterableOptions = listing?.FilterableSpecificationOptions
+            ?? await _specificationAttributeService
+                .GetFiltrableSpecificationAttributeOptionsByCategoryIdAsync(category.Id);
 
         if (_catalogSettings.EnableSpecificationAttributeFiltering)
         {
-            model.SpecificationFilter = await PrepareSpecificationFilterModel(command.Specs, filterableOptions);
+            model.SpecificationFilter = await PrepareSpecificationFilterModel(command.Specs, filterableOptions,
+                listing?.SpecificationOptionProductCounts);
         }
 
         //filterable manufacturers
         if (_catalogSettings.EnableManufacturerFiltering)
         {
-            var manufacturers = await _manufacturerService.GetManufacturersByCategoryIdAsync(category.Id);
+            var manufacturers = listing?.FilterableManufacturers
+                ?? await _manufacturerService.GetManufacturersByCategoryIdAsync(category.Id);
 
-            model.ManufacturerFilter = await PrepareManufacturerFilterModel(command.Ms, manufacturers);
+            model.ManufacturerFilter = await PrepareManufacturerFilterModel(command.Ms, manufacturers,
+                listing?.ManufacturerProductCounts);
         }
 
         var filteredSpecs = command.Specs is null ? null : filterableOptions.Where(fo => command.Specs.Contains(fo.Id)).ToList();
 
         //products
-        var products = await _productService.SearchProductsAsync(
+        var products = listing?.Products ?? await _productService.SearchProductsAsync(
             command.PageNumber - 1,
             command.PageSize,
             categoryIds: categoryIds,
@@ -892,13 +963,47 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             manufacturer.PageSizeOptions, manufacturer.PageSize);
 
         //price range
-        PriceRangeModel selectedPriceRange = null;
-        if (_catalogSettings.EnablePriceRangeFiltering && manufacturer.PriceRangeFiltering)
-        {
-            selectedPriceRange = await GetConvertedPriceRangeAsync(command);
+        var priceRangeFiltering = _catalogSettings.EnablePriceRangeFiltering && manufacturer.PriceRangeFiltering;
+        var selectedPriceRange = priceRangeFiltering ? await GetConvertedPriceRangeAsync(command) : null;
 
-            PriceRangeModel availablePriceRange = null;
-            if (!manufacturer.ManuallyPriceRange)
+        //an active catalog listing provider answers the whole listing at once; whatever it leaves
+        //out is queried below exactly as it is when no provider is active
+        var listing = await GetProvidedListingAsync(new CatalogListingRequest
+        {
+            ListingType = CatalogListingType.Manufacturer,
+            ManufacturerIds = manufacturerIds,
+            StoreId = currentStore.Id,
+            LanguageId = (await _workContext.GetWorkingLanguageAsync()).Id,
+            SelectedSpecificationOptionIds = command.Specs,
+            PriceMin = selectedPriceRange?.From,
+            PriceMax = selectedPriceRange?.To,
+            OrderBy = (ProductSortingEnum)command.OrderBy,
+            PageIndex = command.PageNumber - 1,
+            PageSize = command.PageSize,
+            VisibleIndividuallyOnly = true,
+            ExcludeFeaturedProducts = !_catalogSettings.IgnoreFeaturedProducts && !_catalogSettings.IncludeFeaturedProductsInNormalLists
+        });
+
+        if (priceRangeFiltering)
+        {
+            PriceRangeModel availablePriceRange;
+            if (manufacturer.ManuallyPriceRange)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = manufacturer.PriceFrom,
+                    To = manufacturer.PriceTo
+                };
+            }
+            else if (listing?.AvailablePriceRange is not null)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = listing.AvailablePriceRange.From,
+                    To = listing.AvailablePriceRange.To
+                };
+            }
+            else
             {
                 async Task<decimal?> getProductPriceAsync(ProductSortingEnum orderBy)
                 {
@@ -918,31 +1023,25 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     To = await getProductPriceAsync(ProductSortingEnum.PriceDesc)
                 };
             }
-            else
-            {
-                availablePriceRange = new PriceRangeModel
-                {
-                    From = manufacturer.PriceFrom,
-                    To = manufacturer.PriceTo
-                };
-            }
 
             model.PriceRangeFilter = await PreparePriceRangeFilterAsync(selectedPriceRange, availablePriceRange);
         }
 
         // filterable options
-        var filterableOptions = await _specificationAttributeService
-            .GetFiltrableSpecificationAttributeOptionsByManufacturerIdAsync(manufacturer.Id);
+        var filterableOptions = listing?.FilterableSpecificationOptions
+            ?? await _specificationAttributeService
+                .GetFiltrableSpecificationAttributeOptionsByManufacturerIdAsync(manufacturer.Id);
 
         if (_catalogSettings.EnableSpecificationAttributeFiltering)
         {
-            model.SpecificationFilter = await PrepareSpecificationFilterModel(command.Specs, filterableOptions);
+            model.SpecificationFilter = await PrepareSpecificationFilterModel(command.Specs, filterableOptions,
+                listing?.SpecificationOptionProductCounts);
         }
 
         var filteredSpecs = command.Specs is null ? null : filterableOptions.Where(fo => command.Specs.Contains(fo.Id)).ToList();
 
         //products
-        var products = await _productService.SearchProductsAsync(
+        var products = listing?.Products ?? await _productService.SearchProductsAsync(
             command.PageNumber - 1,
             command.PageSize,
             manufacturerIds: manufacturerIds,
@@ -1124,14 +1223,46 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             vendor.PageSizeOptions, vendor.PageSize);
 
         //price range
-        PriceRangeModel selectedPriceRange = null;
         var store = await _storeContext.GetCurrentStoreAsync();
-        if (_catalogSettings.EnablePriceRangeFiltering && vendor.PriceRangeFiltering)
-        {
-            selectedPriceRange = await GetConvertedPriceRangeAsync(command);
+        var priceRangeFiltering = _catalogSettings.EnablePriceRangeFiltering && vendor.PriceRangeFiltering;
+        var selectedPriceRange = priceRangeFiltering ? await GetConvertedPriceRangeAsync(command) : null;
 
+        //an active catalog listing provider answers the whole listing at once; whatever it leaves
+        //out is queried below exactly as it is when no provider is active
+        var listing = await GetProvidedListingAsync(new CatalogListingRequest
+        {
+            ListingType = CatalogListingType.Vendor,
+            VendorId = vendor.Id,
+            StoreId = store.Id,
+            LanguageId = (await _workContext.GetWorkingLanguageAsync()).Id,
+            PriceMin = selectedPriceRange?.From,
+            PriceMax = selectedPriceRange?.To,
+            OrderBy = (ProductSortingEnum)command.OrderBy,
+            PageIndex = command.PageNumber - 1,
+            PageSize = command.PageSize,
+            VisibleIndividuallyOnly = true
+        });
+
+        if (priceRangeFiltering)
+        {
             PriceRangeModel availablePriceRange;
-            if (!vendor.ManuallyPriceRange)
+            if (vendor.ManuallyPriceRange)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = vendor.PriceFrom,
+                    To = vendor.PriceTo
+                };
+            }
+            else if (listing?.AvailablePriceRange is not null)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = listing.AvailablePriceRange.From,
+                    To = listing.AvailablePriceRange.To
+                };
+            }
+            else
             {
                 async Task<decimal?> getProductPriceAsync(ProductSortingEnum orderBy)
                 {
@@ -1150,20 +1281,12 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     To = await getProductPriceAsync(ProductSortingEnum.PriceDesc)
                 };
             }
-            else
-            {
-                availablePriceRange = new PriceRangeModel
-                {
-                    From = vendor.PriceFrom,
-                    To = vendor.PriceTo
-                };
-            }
 
             model.PriceRangeFilter = await PreparePriceRangeFilterAsync(selectedPriceRange, availablePriceRange);
         }
 
         //products
-        var products = await _productService.SearchProductsAsync(
+        var products = listing?.Products ?? await _productService.SearchProductsAsync(
             command.PageNumber - 1,
             command.PageSize,
             vendorId: vendor.Id,
@@ -1431,14 +1554,46 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             _catalogSettings.ProductsByTagPageSizeOptions, _catalogSettings.ProductsByTagPageSize);
 
         //price range
-        PriceRangeModel selectedPriceRange = null;
         var store = await _storeContext.GetCurrentStoreAsync();
-        if (_catalogSettings.EnablePriceRangeFiltering && _catalogSettings.ProductsByTagPriceRangeFiltering)
-        {
-            selectedPriceRange = await GetConvertedPriceRangeAsync(command);
+        var priceRangeFiltering = _catalogSettings.EnablePriceRangeFiltering && _catalogSettings.ProductsByTagPriceRangeFiltering;
+        var selectedPriceRange = priceRangeFiltering ? await GetConvertedPriceRangeAsync(command) : null;
 
+        //an active catalog listing provider answers the whole listing at once; whatever it leaves
+        //out is queried below exactly as it is when no provider is active
+        var listing = await GetProvidedListingAsync(new CatalogListingRequest
+        {
+            ListingType = CatalogListingType.ProductTag,
+            ProductTagId = productTag.Id,
+            StoreId = store.Id,
+            LanguageId = (await _workContext.GetWorkingLanguageAsync()).Id,
+            PriceMin = selectedPriceRange?.From,
+            PriceMax = selectedPriceRange?.To,
+            OrderBy = (ProductSortingEnum)command.OrderBy,
+            PageIndex = command.PageNumber - 1,
+            PageSize = command.PageSize,
+            VisibleIndividuallyOnly = true
+        });
+
+        if (priceRangeFiltering)
+        {
             PriceRangeModel availablePriceRange;
-            if (!_catalogSettings.ProductsByTagManuallyPriceRange)
+            if (_catalogSettings.ProductsByTagManuallyPriceRange)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = _catalogSettings.ProductsByTagPriceFrom,
+                    To = _catalogSettings.ProductsByTagPriceTo
+                };
+            }
+            else if (listing?.AvailablePriceRange is not null)
+            {
+                availablePriceRange = new PriceRangeModel
+                {
+                    From = listing.AvailablePriceRange.From,
+                    To = listing.AvailablePriceRange.To
+                };
+            }
+            else
             {
                 async Task<decimal?> getProductPriceAsync(ProductSortingEnum orderBy)
                 {
@@ -1457,20 +1612,12 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     To = await getProductPriceAsync(ProductSortingEnum.PriceDesc)
                 };
             }
-            else
-            {
-                availablePriceRange = new PriceRangeModel
-                {
-                    From = _catalogSettings.ProductsByTagPriceFrom,
-                    To = _catalogSettings.ProductsByTagPriceTo
-                };
-            }
 
             model.PriceRangeFilter = await PreparePriceRangeFilterAsync(selectedPriceRange, availablePriceRange);
         }
 
         //products
-        var products = await _productService.SearchProductsAsync(
+        var products = listing?.Products ?? await _productService.SearchProductsAsync(
             command.PageNumber - 1,
             command.PageSize,
             priceMin: selectedPriceRange?.From,
@@ -1713,11 +1860,31 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                 var workingLanguage = await _workContext.GetWorkingLanguageAsync();
 
                 //price range
-                PriceRangeModel selectedPriceRange = null;
-                if (_catalogSettings.EnablePriceRangeFiltering && _catalogSettings.SearchPagePriceRangeFiltering)
-                {
-                    selectedPriceRange = await GetConvertedPriceRangeAsync(command);
+                var priceRangeFiltering = _catalogSettings.EnablePriceRangeFiltering && _catalogSettings.SearchPagePriceRangeFiltering;
+                var selectedPriceRange = priceRangeFiltering ? await GetConvertedPriceRangeAsync(command) : null;
 
+                //an active catalog listing provider answers the whole listing at once; whatever it
+                //leaves out is queried below exactly as it is when no provider is active
+                var listing = await GetProvidedListingAsync(new CatalogListingRequest
+                {
+                    ListingType = CatalogListingType.Search,
+                    Keywords = searchTerms,
+                    SearchInDescriptions = searchInDescriptions,
+                    CategoryIds = categoryIds,
+                    ManufacturerIds = new List<int> { manufacturerId },
+                    VendorId = vendorId,
+                    StoreId = currentStore.Id,
+                    LanguageId = workingLanguage.Id,
+                    PriceMin = selectedPriceRange?.From,
+                    PriceMax = selectedPriceRange?.To,
+                    OrderBy = (ProductSortingEnum)command.OrderBy,
+                    PageIndex = command.PageNumber - 1,
+                    PageSize = command.PageSize,
+                    VisibleIndividuallyOnly = true
+                });
+
+                if (priceRangeFiltering)
+                {
                     PriceRangeModel availablePriceRange;
                     async Task<decimal?> getProductPriceAsync(ProductSortingEnum orderBy)
                     {
@@ -1738,7 +1905,9 @@ public partial class CatalogModelFactory : ICatalogModelFactory
 
                     if (_catalogSettings.SearchPageManuallyPriceRange)
                     {
-                        var to = await getProductPriceAsync(ProductSortingEnum.PriceDesc);
+                        var to = listing?.AvailablePriceRange is not null
+                            ? listing.AvailablePriceRange.To ?? 0
+                            : await getProductPriceAsync(ProductSortingEnum.PriceDesc);
 
                         availablePriceRange = new PriceRangeModel
                         {
@@ -1746,6 +1915,12 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                             To = to == 0 ? 0 : _catalogSettings.SearchPagePriceTo
                         };
                     }
+                    else if (listing?.AvailablePriceRange is not null)
+                        availablePriceRange = new PriceRangeModel
+                        {
+                            From = listing.AvailablePriceRange.From,
+                            To = listing.AvailablePriceRange.To
+                        };
                     else
                         availablePriceRange = new PriceRangeModel
                         {
@@ -1757,7 +1932,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                 }
 
                 //products
-                products = await _productService.SearchProductsAsync(
+                products = listing?.Products ?? await _productService.SearchProductsAsync(
                     command.PageNumber - 1,
                     command.PageSize,
                     categoryIds: categoryIds,

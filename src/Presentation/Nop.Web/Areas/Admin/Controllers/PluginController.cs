@@ -527,6 +527,20 @@ public partial class PluginController : BaseAdminController
                     await _settingService.SaveSettingAsync(_catalogSettings);
                     break;
 
+                case ICatalogListingProvider _:
+                    if (!model.IsEnabled)
+                    {
+                        //mark as disabled
+                        _catalogSettings.ActiveCatalogListingProviderSystemName = string.Empty;
+                        await _settingService.SaveSettingAsync(_catalogSettings);
+                        break;
+                    }
+
+                    //mark as enabled
+                    _catalogSettings.ActiveCatalogListingProviderSystemName = model.SystemName;
+                    await _settingService.SaveSettingAsync(_catalogSettings);
+                    break;
+
                 case IWidgetPlugin widgetPlugin:
                     pluginIsActive = _widgetPluginManager.IsPluginActive(widgetPlugin);
                     if (pluginIsActive && !model.IsEnabled)

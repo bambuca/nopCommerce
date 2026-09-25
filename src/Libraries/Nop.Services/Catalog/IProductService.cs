@@ -132,6 +132,16 @@ public partial interface IProductService
     Task<int> GetNumberOfProductsInCategoryAsync(IList<int> categoryIds = null, int storeId = 0);
 
     /// <summary>
+    /// Get number of products (published and visible) mapped directly to each category
+    /// </summary>
+    /// <param name="storeId">Store identifier; 0 to load all records</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the number of products keyed by category identifier; categories without products are omitted
+    /// </returns>
+    Task<IDictionary<int, int>> GetNumberOfProductsByCategoryAsync(int storeId = 0);
+
+    /// <summary>
     /// Search products
     /// </summary>
     /// <param name="pageIndex">Page index</param>

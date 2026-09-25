@@ -773,6 +773,43 @@ public partial class ProductService : IProductService
     }
 
     /// <summary>
+    /// Get number of products (published and visible) mapped directly to each category
+    /// </summary>
+    /// <param name="storeId">Store identifier; 0 to load all records</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the number of products keyed by category identifier; categories without products are omitted
+    /// </returns>
+    public virtual async Task<IDictionary<int, int>> GetNumberOfProductsByCategoryAsync(int storeId = 0)
+    {
+        var customer = await _workContext.GetCurrentCustomerAsync();
+        var customerRoleIds = await _customerService.GetCustomerRoleIdsAsync(customer);
+
+        var cacheKey = _staticCacheManager
+            .PrepareKeyForDefaultCache(NopCatalogDefaults.CategoryProductsNumberByCategoryCacheKey, customerRoleIds, storeId);
+
+        //one grouped query instead of one query per category
+        return await _staticCacheManager.GetAsync(cacheKey, async () =>
+        {
+            var query = _productRepository.Table.Where(p => p.Published && !p.Deleted && p.VisibleIndividually);
+
+            //apply store mapping constraints
+            query = await _storeMappingService.ApplyStoreMapping(query, storeId);
+
+            //apply ACL constraints
+            query = await _aclService.ApplyAcl(query, customerRoleIds);
+
+            var numbers = await (from p in query
+                                 join pc in _productCategoryRepository.Table on p.Id equals pc.ProductId
+                                 group pc by pc.CategoryId into g
+                                 select new { CategoryId = g.Key, Number = g.Count() })
+                .ToListAsync();
+
+            return (IDictionary<int, int>)numbers.ToDictionary(n => n.CategoryId, n => n.Number);
+        });
+    }
+
+    /// <summary>
     /// Search products
     /// </summary>
     /// <param name="pageIndex">Page index</param>

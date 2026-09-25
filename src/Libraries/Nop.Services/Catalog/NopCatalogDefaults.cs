@@ -177,6 +177,15 @@ public static partial class NopCatalogDefaults
     public static CacheKey CategoryProductsNumberCacheKey => new("Nop.productcategory.products.number.{0}-{1}-{2}");
 
     /// <summary>
+    /// Gets a key for number of products per category
+    /// </summary>
+    /// <remarks>
+    /// {0} : customer roles ID hash
+    /// {1} : current store ID
+    /// </remarks>
+    public static CacheKey CategoryProductsNumberByCategoryCacheKey => new("Nop.productcategory.products.number.bycategory.{0}-{1}");
+
+    /// <summary>
     /// Gets a key pattern to clear cache
     /// </summary>
     public static string CategoryProductsNumberPrefix => "Nop.productcategory.products.number.";

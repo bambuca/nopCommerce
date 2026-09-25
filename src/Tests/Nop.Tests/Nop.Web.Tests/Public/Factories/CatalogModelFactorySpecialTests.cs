@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using Nop.Core;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Vendors;
 using Nop.Services.Catalog;
@@ -89,6 +90,32 @@ public class CatalogModelFactorySpecialTests : WebTest
         model.CategoryBreadcrumb.Any().Should().BeFalse();
         model.SubCategories.Count.Should().Be(3);
         model.CatalogProductsModel.Products.Count.Should().Be(6);
+    }
+
+    [Test]
+    public async Task PrepareCategoryNavigationModelShouldCountProductsIncludingSubcategories()
+    {
+        var categoryService = GetService<ICategoryService>();
+        var productService = GetService<IProductService>();
+        var store = await GetService<IStoreContext>().GetCurrentStoreAsync();
+
+        var model = await _catalogModelFactory.PrepareCategoryNavigationModelAsync(0, 0);
+        model.Categories.Any().Should().BeTrue();
+
+        async Task checkAsync(IEnumerable<CategorySimpleModel> categories)
+        {
+            foreach (var category in categories)
+            {
+                var categoryIds = new List<int> { category.Id };
+                categoryIds.AddRange(await categoryService.GetChildCategoryIdsAsync(category.Id, store.Id));
+                var expected = await productService.GetNumberOfProductsInCategoryAsync(categoryIds, store.Id);
+
+                category.NumberOfProducts.Should().Be(expected, $"category #{category.Id} should have the same number of products");
+                await checkAsync(category.SubCategories);
+            }
+        }
+
+        await checkAsync(model.Categories);
     }
 
     [Test]

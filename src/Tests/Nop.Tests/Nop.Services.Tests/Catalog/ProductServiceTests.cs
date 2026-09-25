@@ -1,6 +1,11 @@
 ﻿using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Nop.Core.Caching;
 using Nop.Core.Domain.Catalog;
+using Nop.Core.Domain.Stores;
 using Nop.Services.Catalog;
+using Nop.Services.Configuration;
+using Nop.Services.Stores;
 using NUnit.Framework;
 
 namespace Nop.Tests.Nop.Services.Tests.Catalog;
@@ -363,6 +368,93 @@ public class ProductServiceTests : ServiceTest
         _productService.GetRentalPeriods(product, new DateTime(2014, 3, 5), new DateTime(2015, 3, 7)).Should().Be(1);
         //more than two year
         _productService.GetRentalPeriods(product, new DateTime(2014, 3, 5), new DateTime(2016, 3, 7)).Should().Be(2);
+    }
+
+    [Test]
+    public async Task GetNumberOfProductsByCategoryShouldMatchNumberOfProductsInCategory()
+    {
+        var categoryService = GetService<ICategoryService>();
+        var numbers = await _productService.GetNumberOfProductsByCategoryAsync();
+
+        numbers.Values.Sum().Should().BePositive();
+
+        foreach (var category in await categoryService.GetAllCategoriesAsync(showHidden: true))
+        {
+            var expected = await _productService.GetNumberOfProductsInCategoryAsync(new List<int> { category.Id });
+            numbers.TryGetValue(category.Id, out var actual);
+            actual.Should().Be(expected, $"category #{category.Id} should have the same number of products");
+        }
+    }
+
+    [Test]
+    public async Task GetNumberOfProductsByCategoryShouldApplyStoreMappingLikeNumberOfProductsInCategory()
+    {
+        var categoryService = GetService<ICategoryService>();
+        var storeService = GetService<IStoreService>();
+        var storeMappingService = GetService<IStoreMappingService>();
+        var settingService = GetService<ISettingService>();
+        var staticCacheManager = GetService<IStaticCacheManager>();
+        var catalogSettings = GetService<CatalogSettings>();
+        var ignoreStoreLimitations = catalogSettings.IgnoreStoreLimitations;
+
+        var store = (await storeService.GetAllStoresAsync()).First();
+        var otherStore = new Store { Name = "Store without the product", Url = "http://other-store/", Hosts = "other-store" };
+        await storeService.InsertStoreAsync(otherStore);
+
+        //a published product of some category becomes limited to the other store only
+        var numbers = await _productService.GetNumberOfProductsByCategoryAsync();
+        var (categoryId, product) = await getVisibleProductOfCategoryAsync();
+        product.LimitedToStores = true;
+        await _productService.UpdateProductAsync(product);
+        await storeMappingService.InsertStoreMappingAsync(product, otherStore.Id);
+        catalogSettings.IgnoreStoreLimitations = false;
+        await settingService.SaveSettingAsync(catalogSettings);
+        await staticCacheManager.RemoveByPrefixAsync(NopCatalogDefaults.CategoryProductsNumberPrefix);
+
+        try
+        {
+            //settings are transient, so services created before the change still ignore store limitations
+            using var scope = GetService<IServiceScopeFactory>().CreateScope();
+            var productService = GetService<IProductService>(scope);
+            var storeNumbers = await productService.GetNumberOfProductsByCategoryAsync(store.Id);
+
+            storeNumbers.TryGetValue(categoryId, out var limitedNumber);
+            limitedNumber.Should().BeLessThan(numbers[categoryId], "the product is limited to another store");
+
+            foreach (var category in await categoryService.GetAllCategoriesAsync(showHidden: true))
+            {
+                var expected = await productService.GetNumberOfProductsInCategoryAsync(new List<int> { category.Id }, store.Id);
+                storeNumbers.TryGetValue(category.Id, out var actual);
+                actual.Should().Be(expected, $"category #{category.Id} should have the same number of products in the store");
+            }
+        }
+        finally
+        {
+            catalogSettings.IgnoreStoreLimitations = ignoreStoreLimitations;
+            await settingService.SaveSettingAsync(catalogSettings);
+            foreach (var storeMapping in await storeMappingService.GetStoreMappingsAsync(product))
+                await storeMappingService.DeleteStoreMappingAsync(storeMapping);
+            product.LimitedToStores = false;
+            await _productService.UpdateProductAsync(product);
+            await storeService.DeleteStoreAsync(otherStore);
+            await staticCacheManager.RemoveByPrefixAsync(NopCatalogDefaults.CategoryProductsNumberPrefix);
+        }
+
+        async Task<(int CategoryId, Product Product)> getVisibleProductOfCategoryAsync()
+        {
+            foreach (var categoryWithProducts in numbers.Keys)
+            {
+                var productIds = (await categoryService.GetProductCategoriesByCategoryIdAsync(categoryWithProducts, showHidden: true))
+                    .Select(productCategory => productCategory.ProductId);
+                var visibleProduct = (await _productService.GetProductsByIdsAsync(productIds.ToArray()))
+                    .FirstOrDefault(p => p.Published && p.VisibleIndividually);
+
+                if (visibleProduct != null)
+                    return (categoryWithProducts, visibleProduct);
+            }
+
+            throw new InvalidOperationException("No published product mapped to a category");
+        }
     }
 
     #endregion

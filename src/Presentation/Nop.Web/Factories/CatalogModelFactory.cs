@@ -8,6 +8,7 @@ using Nop.Core.Domain.Customers;
 using Nop.Core.Domain.Forums;
 using Nop.Core.Domain.Media;
 using Nop.Core.Domain.Seo;
+using Nop.Core.Domain.Stores;
 using Nop.Core.Domain.Vendors;
 using Nop.Core.Events;
 using Nop.Services.Catalog;
@@ -482,6 +483,30 @@ public partial class CatalogModelFactory : ICatalogModelFactory
     /// </returns>
     protected virtual async Task<List<CategorySimpleModel>> PrepareCategorySimpleModelsAsync(int rootCategoryId, bool loadSubCategories = true)
     {
+        var store = await _storeContext.GetCurrentStoreAsync();
+
+        //numbers of products of all categories are loaded once (by a single cached query) for the whole tree
+        var productNumbers = _catalogSettings.ShowCategoryProductNumber
+            ? await _productService.GetNumberOfProductsByCategoryAsync(store.Id)
+            : null;
+
+        return await PrepareCategorySimpleModelsAsync(rootCategoryId, loadSubCategories, store, productNumbers);
+    }
+
+    /// <summary>
+    /// Prepare category (simple) models
+    /// </summary>
+    /// <param name="rootCategoryId">Root category identifier</param>
+    /// <param name="loadSubCategories">A value indicating whether subcategories should be loaded</param>
+    /// <param name="store">Current store</param>
+    /// <param name="productNumbers">Number of products keyed by category identifier; null when not displayed</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the list of category (simple) models
+    /// </returns>
+    private async Task<List<CategorySimpleModel>> PrepareCategorySimpleModelsAsync(int rootCategoryId, bool loadSubCategories,
+        Store store, IDictionary<int, int> productNumbers)
+    {
         var result = new List<CategorySimpleModel>();
 
         //little hack for performance optimization
@@ -489,7 +514,6 @@ public partial class CatalogModelFactory : ICatalogModelFactory
         //it'll load all categories anyway.
         //so there's no need to invoke "GetAllCategoriesByParentCategoryId" multiple times (extra SQL commands) to load childs
         //so we load all categories at once (we know they are cached)
-        var store = await _storeContext.GetCurrentStoreAsync();
         var allCategories = await _categoryService.GetAllCategoriesAsync(storeId: store.Id);
         var categories = allCategories.Where(c => c.ParentCategoryId == rootCategoryId).OrderBy(c => c.DisplayOrder).ToList();
         foreach (var category in categories)
@@ -502,7 +526,7 @@ public partial class CatalogModelFactory : ICatalogModelFactory
             };
 
             //number of products in each category
-            if (_catalogSettings.ShowCategoryProductNumber)
+            if (productNumbers != null)
             {
                 var categoryIds = new List<int> { category.Id };
                 //include subcategories
@@ -510,13 +534,12 @@ public partial class CatalogModelFactory : ICatalogModelFactory
                     categoryIds.AddRange(
                         await _categoryService.GetChildCategoryIdsAsync(category.Id, store.Id));
 
-                categoryModel.NumberOfProducts =
-                    await _productService.GetNumberOfProductsInCategoryAsync(categoryIds, store.Id);
+                categoryModel.NumberOfProducts = categoryIds.Sum(id => productNumbers.TryGetValue(id, out var number) ? number : 0);
             }
 
             if (loadSubCategories)
             {
-                var subCategories = await PrepareCategorySimpleModelsAsync(category.Id);
+                var subCategories = await PrepareCategorySimpleModelsAsync(category.Id, true, store, productNumbers);
                 categoryModel.SubCategories.AddRange(subCategories);
             }
 

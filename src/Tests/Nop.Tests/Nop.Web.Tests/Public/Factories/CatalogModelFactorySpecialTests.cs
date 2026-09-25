@@ -100,7 +100,7 @@ public class CatalogModelFactorySpecialTests : WebTest
         var store = await GetService<IStoreContext>().GetCurrentStoreAsync();
 
         var model = await _catalogModelFactory.PrepareCategoryNavigationModelAsync(0, 0);
-        model.Categories.Any().Should().BeTrue();
+        model.Categories.Should().NotBeEmpty();
 
         async Task checkAsync(IEnumerable<CategorySimpleModel> categories)
         {

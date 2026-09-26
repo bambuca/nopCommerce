@@ -271,4 +271,40 @@ public class MemoryCacheManagerTests : BaseNopTest
         result.Should().BeEmpty();
         (await _staticCacheManager.GetAsync(new CacheKey("many_skip_1"), default(List<int>))).Should().BeNull();
     }
+
+    [Test]
+    public async Task GetManyWithNoKeysReturnsNothingAndDoesNotLoad()
+    {
+        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(Array.Empty<int>(), id => new CacheKey($"many_none_{id}"),
+            _ => throw new InvalidOperationException("nothing should be loaded"));
+
+        result.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task GetManyPreparesTheKeyOncePerItem()
+    {
+        var prepared = new List<int>();
+
+        await _staticCacheManager.GetManyAsync<int, List<int>>(_manyKeys, id =>
+            {
+                prepared.Add(id);
+                return new CacheKey($"many_prepare_{id}");
+            },
+            _ => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>>()),
+            _ => new List<int>());
+
+        prepared.Should().Equal(1, 2, 3);
+    }
+
+    [Test]
+    public async Task GetManySkipsItemsTheLoadReturnedAsNullWithoutTheFallback()
+    {
+        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(_oneKey, id => new CacheKey($"many_null_value_{id}"),
+            _ => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>> { [1] = null }),
+            _ => throw new InvalidOperationException("the fallback is only for items the load did not return"));
+
+        result.Should().BeEmpty();
+        (await _staticCacheManager.GetAsync(new CacheKey("many_null_value_1"), default(List<int>))).Should().BeNull();
+    }
 }

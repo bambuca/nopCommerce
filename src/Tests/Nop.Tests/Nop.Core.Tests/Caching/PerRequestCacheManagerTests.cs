@@ -71,4 +71,39 @@ public class PerRequestCacheManagerTests : BaseNopTest
         //nothing was cached, so a per-item call loads the item
         (await _shortTermCacheManager.GetAsync(() => Task.FromResult(new List<int> { 7 }), _cacheKey, 1)).Should().Equal(7);
     }
+
+    [Test]
+    public async Task GetManyWithNoKeysReturnsNothingAndDoesNotLoad()
+    {
+        var result = await _shortTermCacheManager.GetManyAsync<int, List<int>>(Array.Empty<int>(), _cacheKey, KeyParameters,
+            _ => throw new InvalidOperationException("nothing should be loaded"));
+
+        result.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task GetManyPreparesTheKeyParametersOncePerItem()
+    {
+        var prepared = new List<int>();
+
+        await _shortTermCacheManager.GetManyAsync<int, List<int>>(_manyKeys, _cacheKey, id =>
+            {
+                prepared.Add(id);
+                return KeyParameters(id);
+            },
+            _ => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>>()),
+            _ => new List<int>());
+
+        prepared.Should().Equal(1, 2, 3);
+    }
+
+    [Test]
+    public async Task GetManySkipsItemsTheLoadReturnedAsNullWithoutTheFallback()
+    {
+        var result = await _shortTermCacheManager.GetManyAsync<int, List<int>>(_oneKey, _cacheKey, KeyParameters,
+            _ => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>> { [1] = null }),
+            _ => throw new InvalidOperationException("the fallback is only for items the load did not return"));
+
+        result.Should().BeEmpty();
+    }
 }

@@ -27,7 +27,8 @@ public static class CachingExtensions
     /// <param name="keys">Item identifiers</param>
     /// <param name="prepareKey">Function to prepare the cache key of an item</param>
     /// <param name="acquireMissing">Function to load the items that are not in the cache yet</param>
-    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items</param>
+    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items.
+    /// An item the load returned as null is skipped without the fallback, as a null value is never cached</param>
     /// <returns>
     /// A task that represents the asynchronous operation
     /// The task result contains the cached values by item identifier
@@ -40,10 +41,10 @@ public static class CachingExtensions
         ArgumentNullException.ThrowIfNull(prepareKey);
         ArgumentNullException.ThrowIfNull(acquireMissing);
 
-        return await GetManyCoreAsync(keys,
-            key => cacheManager.GetAsync(prepareKey(key), default(T)),
+        return await GetManyCoreAsync(keys, prepareKey,
+            key => cacheManager.GetAsync(key, default(T)),
             //cache through the same "get or load" call the per-item method uses, so a value cached meanwhile wins
-            (key, value) => cacheManager.GetAsync<T>(prepareKey(key), () => value),
+            (key, value) => cacheManager.GetAsync<T>(key, () => value),
             acquireMissing, ifNotLoaded);
     }
 
@@ -59,7 +60,8 @@ public static class CachingExtensions
     /// <param name="cacheKey">Initial cache key</param>
     /// <param name="cacheKeyParameters">Function to get the parameters of the cache key of an item</param>
     /// <param name="acquireMissing">Function to load the items that are not in the cache yet</param>
-    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items</param>
+    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items.
+    /// An item the load returned as null is skipped without the fallback, as a null value is never cached</param>
     /// <returns>
     /// A task that represents the asynchronous operation
     /// The task result contains the cached values by item identifier
@@ -73,10 +75,10 @@ public static class CachingExtensions
         ArgumentNullException.ThrowIfNull(cacheKeyParameters);
         ArgumentNullException.ThrowIfNull(acquireMissing);
 
-        return await GetManyCoreAsync(keys,
+        return await GetManyCoreAsync(keys, cacheKeyParameters,
             //the short term cache has no "try get"; an acquire returning null only reads, because null values are not cached
-            key => cacheManager.GetAsync(() => Task.FromResult<T>(null), cacheKey, cacheKeyParameters(key)),
-            (key, value) => cacheManager.GetAsync(() => Task.FromResult(value), cacheKey, cacheKeyParameters(key)),
+            parameters => cacheManager.GetAsync(() => Task.FromResult<T>(null), cacheKey, parameters),
+            (parameters, value) => cacheManager.GetAsync(() => Task.FromResult(value), cacheKey, parameters),
             acquireMissing, ifNotLoaded);
     }
 
@@ -85,45 +87,49 @@ public static class CachingExtensions
     /// shared by the cache managers, which differ only in how a single item is read from and written to the cache
     /// </summary>
     /// <typeparam name="TKey">Type of the item identifier</typeparam>
+    /// <typeparam name="TCacheKey">Type of the prepared cache key of an item</typeparam>
     /// <typeparam name="T">Type of cached item</typeparam>
     /// <param name="keys">Item identifiers</param>
-    /// <param name="getCached">Function to get the cached item, or null when it is not cached</param>
-    /// <param name="cache">Function to cache an item and return the cached value</param>
+    /// <param name="prepareKey">Function to prepare the cache key of an item; called once per item</param>
+    /// <param name="getCached">Function to get the item cached under the key, or null when it is not cached</param>
+    /// <param name="cache">Function to cache an item under the key and return the cached value</param>
     /// <param name="acquireMissing">Function to load the items that are not in the cache yet</param>
-    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items</param>
+    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items.
+    /// An item the load returned as null is skipped without the fallback, as a null value is never cached</param>
     /// <returns>
     /// A task that represents the asynchronous operation
     /// The task result contains the cached values by item identifier
     /// </returns>
-    private static async Task<IDictionary<TKey, T>> GetManyCoreAsync<TKey, T>(IEnumerable<TKey> keys,
-        Func<TKey, Task<T>> getCached, Func<TKey, T, Task<T>> cache,
+    private static async Task<IDictionary<TKey, T>> GetManyCoreAsync<TKey, TCacheKey, T>(IEnumerable<TKey> keys,
+        Func<TKey, TCacheKey> prepareKey, Func<TCacheKey, Task<T>> getCached, Func<TCacheKey, T, Task<T>> cache,
         Func<TKey[], Task<IDictionary<TKey, T>>> acquireMissing, Func<TKey, T> ifNotLoaded) where T : class
     {
         var result = new Dictionary<TKey, T>();
-        var missing = new List<TKey>();
+        var missing = new List<(TKey Key, TCacheKey CacheKey)>();
 
         foreach (var key in keys.Distinct())
         {
-            var cached = await getCached(key);
+            var cacheKey = prepareKey(key);
+            var cached = await getCached(cacheKey);
 
             if (cached != null)
                 result[key] = cached;
             else
-                missing.Add(key);
+                missing.Add((key, cacheKey));
         }
 
-        if (!missing.Any())
+        if (missing.Count == 0)
             return result;
 
-        var loaded = await acquireMissing(missing.ToArray());
+        var loaded = await acquireMissing(missing.Select(item => item.Key).ToArray());
 
-        foreach (var key in missing)
+        foreach (var (key, cacheKey) in missing)
         {
             var value = loaded.TryGetValue(key, out var item) ? item : ifNotLoaded?.Invoke(key);
             if (value == null)
                 continue;
 
-            result[key] = await cache(key, value);
+            result[key] = await cache(cacheKey, value);
         }
 
         return result;

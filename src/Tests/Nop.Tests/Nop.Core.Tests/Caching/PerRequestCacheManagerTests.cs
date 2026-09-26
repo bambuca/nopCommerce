@@ -50,6 +50,17 @@ public class PerRequestCacheManagerTests : BaseNopTest
     }
 
     [Test]
+    public async Task GetManyRejectsNullArguments()
+    {
+        static Task<IDictionary<int, List<int>>> load(int[] _) => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>>());
+
+        await _shortTermCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(null, _cacheKey, KeyParameters, load)).Should().ThrowAsync<ArgumentNullException>();
+        await _shortTermCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(_oneKey, null, KeyParameters, load)).Should().ThrowAsync<ArgumentNullException>();
+        await _shortTermCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(_oneKey, _cacheKey, null, load)).Should().ThrowAsync<ArgumentNullException>();
+        await _shortTermCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(_oneKey, _cacheKey, KeyParameters, null)).Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Test]
     public async Task GetManySkipsItemsTheLoadDidNotReturnWhenThereIsNoFallback()
     {
         var result = await _shortTermCacheManager.GetManyAsync<int, List<int>>(_oneKey, _cacheKey, KeyParameters,

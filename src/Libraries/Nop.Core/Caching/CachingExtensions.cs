@@ -40,36 +40,11 @@ public static class CachingExtensions
         ArgumentNullException.ThrowIfNull(prepareKey);
         ArgumentNullException.ThrowIfNull(acquireMissing);
 
-        var result = new Dictionary<TKey, T>();
-        var missing = new List<(TKey Key, CacheKey CacheKey)>();
-
-        foreach (var key in keys.Distinct())
-        {
-            var cacheKey = prepareKey(key);
-            var cached = await cacheManager.GetAsync(cacheKey, default(T));
-
-            if (cached != null)
-                result[key] = cached;
-            else
-                missing.Add((key, cacheKey));
-        }
-
-        if (!missing.Any())
-            return result;
-
-        var loaded = await acquireMissing(missing.Select(item => item.Key).ToArray());
-
-        foreach (var (key, cacheKey) in missing)
-        {
-            var value = loaded.TryGetValue(key, out var item) ? item : ifNotLoaded?.Invoke(key);
-            if (value == null)
-                continue;
-
+        return await GetManyCoreAsync(keys,
+            key => cacheManager.GetAsync(prepareKey(key), default(T)),
             //cache through the same "get or load" call the per-item method uses, so a value cached meanwhile wins
-            result[key] = await cacheManager.GetAsync<T>(cacheKey, () => value);
-        }
-
-        return result;
+            (key, value) => cacheManager.GetAsync<T>(prepareKey(key), () => value),
+            acquireMissing, ifNotLoaded);
     }
 
     /// <summary>
@@ -98,13 +73,38 @@ public static class CachingExtensions
         ArgumentNullException.ThrowIfNull(cacheKeyParameters);
         ArgumentNullException.ThrowIfNull(acquireMissing);
 
+        return await GetManyCoreAsync(keys,
+            //the short term cache has no "try get"; an acquire returning null only reads, because null values are not cached
+            key => cacheManager.GetAsync(() => Task.FromResult<T>(null), cacheKey, cacheKeyParameters(key)),
+            (key, value) => cacheManager.GetAsync(() => Task.FromResult(value), cacheKey, cacheKeyParameters(key)),
+            acquireMissing, ifNotLoaded);
+    }
+
+    /// <summary>
+    /// Get cached items for several keys, loading the missing ones with a single call; the part of GetManyAsync
+    /// shared by the cache managers, which differ only in how a single item is read from and written to the cache
+    /// </summary>
+    /// <typeparam name="TKey">Type of the item identifier</typeparam>
+    /// <typeparam name="T">Type of cached item</typeparam>
+    /// <param name="keys">Item identifiers</param>
+    /// <param name="getCached">Function to get the cached item, or null when it is not cached</param>
+    /// <param name="cache">Function to cache an item and return the cached value</param>
+    /// <param name="acquireMissing">Function to load the items that are not in the cache yet</param>
+    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the cached values by item identifier
+    /// </returns>
+    private static async Task<IDictionary<TKey, T>> GetManyCoreAsync<TKey, T>(IEnumerable<TKey> keys,
+        Func<TKey, Task<T>> getCached, Func<TKey, T, Task<T>> cache,
+        Func<TKey[], Task<IDictionary<TKey, T>>> acquireMissing, Func<TKey, T> ifNotLoaded) where T : class
+    {
         var result = new Dictionary<TKey, T>();
         var missing = new List<TKey>();
 
         foreach (var key in keys.Distinct())
         {
-            //the short term cache has no "try get"; an acquire returning null only reads, because null values are not cached
-            var cached = await cacheManager.GetAsync(() => Task.FromResult<T>(null), cacheKey, cacheKeyParameters(key));
+            var cached = await getCached(key);
 
             if (cached != null)
                 result[key] = cached;
@@ -123,7 +123,7 @@ public static class CachingExtensions
             if (value == null)
                 continue;
 
-            result[key] = await cacheManager.GetAsync(() => Task.FromResult(value), cacheKey, cacheKeyParameters(key));
+            result[key] = await cache(key, value);
         }
 
         return result;

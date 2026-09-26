@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Nop.Core;
 using Nop.Core.Caching;
 using Nop.Core.Domain.Catalog;
@@ -12,6 +13,7 @@ using Nop.Core.Domain.Vendors;
 using Nop.Data;
 using Nop.Services.Catalog;
 using Nop.Services.Common;
+using Nop.Services.Configuration;
 using Nop.Services.Customers;
 using Nop.Services.Directory;
 using Nop.Services.Discounts;
@@ -114,6 +116,44 @@ public class ProductModelFactoryTests : WebTest
         expected.Values.Should().Contain(pictures => pictures.Count > 0 && pictures[0].ImageUrl != null);
         foreach (var model in models)
             model.PictureModels.Should().BeEquivalentTo(expected[model.Id], options => options.WithStrictOrdering());
+    }
+
+    [Test]
+    public async Task ProductOverviewModelsOfListWithFromPricesHaveTheSamePricesAsOfSingleProducts()
+    {
+        var settingService = GetService<ISettingService>();
+        var staticCacheManager = GetService<IStaticCacheManager>();
+        var catalogSettings = GetService<CatalogSettings>();
+        var displayFromPrices = catalogSettings.DisplayFromPrices;
+        catalogSettings.DisplayFromPrices = true;
+        await settingService.SaveSettingAsync(catalogSettings);
+
+        try
+        {
+            //settings are transient, so the factory has to come from a scope created after the change
+            using var scope = GetService<IServiceScopeFactory>().CreateScope();
+            var productModelFactory = GetService<IProductModelFactory>(scope);
+            var products = await _productService.GetProductsByIdsAsync(Enumerable.Range(1, 12).ToArray());
+
+            //one product at a time: attribute mappings are loaded per product
+            await staticCacheManager.ClearAsync();
+            var expected = new Dictionary<int, ProductPriceModel>();
+            foreach (var product in products)
+                expected[product.Id] = (await productModelFactory.PrepareProductOverviewModelsAsync(new[] { product })).Single().ProductPrice;
+
+            //the whole list: attribute mappings of the products missing from the cache are loaded with one query
+            await staticCacheManager.ClearAsync();
+            var models = await productModelFactory.PrepareProductOverviewModelsAsync(products);
+
+            foreach (var model in models)
+                model.ProductPrice.Should().BeEquivalentTo(expected[model.Id]);
+        }
+        finally
+        {
+            catalogSettings.DisplayFromPrices = displayFromPrices;
+            await settingService.SaveSettingAsync(catalogSettings);
+            await staticCacheManager.ClearAsync();
+        }
     }
 
     [Test]

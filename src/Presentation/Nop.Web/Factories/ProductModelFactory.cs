@@ -1445,9 +1445,13 @@ public partial class ProductModelFactory : IProductModelFactory
         //load the ones missing from the caches with one query each, so the per-product calls are served from cache
         if (preparePriceModel && productList.Count > 1)
         {
+            var productIds = productList.Select(p => p.Id).ToArray();
             await _discountService.GetAppliedDiscountsAsync(productList);
-            await _productService.GetTierPricesByProductsAsync(productList.Select(p => p.Id).ToArray());
-            await _productAttributeService.GetProductAttributeMappingsByProductIdsAsync(productList.Select(p => p.Id).ToArray());
+            await _productService.GetTierPricesByProductsAsync(productIds);
+
+            //attribute mappings are read only for "from" prices (see PrepareProductPriceModelAsync)
+            if (_catalogSettings.DisplayFromPrices)
+                await _productAttributeService.GetProductAttributeMappingsByProductIdsAsync(productIds);
         }
 
         //the same for pictures: products missing from the picture model cache get their pictures with one query

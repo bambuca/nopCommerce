@@ -18,7 +18,8 @@ public static class CachingExtensions
 
     /// <summary>
     /// Get cached items for several keys. The ones not in the cache yet are loaded with a single call and cached,
-    /// each under the same key and with the same type as the per-item method caches them, so both share the cache
+    /// each under the same key and with the same type as the per-item method caches them, so both share the cache.
+    /// The cache itself is still read key by key; only the load of the missing items is batched
     /// </summary>
     /// <typeparam name="TKey">Type of the item identifier</typeparam>
     /// <typeparam name="T">Type of cached item; must match the type cached by the per-item method</typeparam>
@@ -36,6 +37,8 @@ public static class CachingExtensions
         Func<TKey[], Task<IDictionary<TKey, T>>> acquireMissing, Func<TKey, T> ifNotLoaded = null) where T : class
     {
         ArgumentNullException.ThrowIfNull(keys);
+        ArgumentNullException.ThrowIfNull(prepareKey);
+        ArgumentNullException.ThrowIfNull(acquireMissing);
 
         var result = new Dictionary<TKey, T>();
         var missing = new List<(TKey Key, CacheKey CacheKey)>();

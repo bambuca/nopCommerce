@@ -66,4 +66,11 @@ public class ProductAttributeServiceBatchTests : ServiceTest
         (await _productAttributeService.GetProductAttributeMappingsByProductIdsAsync([1]))
             .Should().ContainSingle().Which.Value.Should().BeSameAs(single);
     }
+
+    [Test]
+    public async Task NullInputIsRejected()
+    {
+        await _productAttributeService.Invoking(s => s.GetProductAttributeMappingsByProductIdsAsync(null))
+            .Should().ThrowAsync<ArgumentNullException>();
+    }
 }

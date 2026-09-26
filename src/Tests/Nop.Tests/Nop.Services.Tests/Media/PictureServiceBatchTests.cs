@@ -53,5 +53,6 @@ public class PictureServiceBatchTests : ServiceTest
     {
         (await _pictureService.GetPicturesByProductIdsAsync([])).Should().BeEmpty();
         (await _pictureService.GetPicturesByProductIdsAsync([0])).Should().BeEmpty();
+        await _pictureService.Invoking(s => s.GetPicturesByProductIdsAsync(null)).Should().ThrowAsync<ArgumentNullException>();
     }
 }

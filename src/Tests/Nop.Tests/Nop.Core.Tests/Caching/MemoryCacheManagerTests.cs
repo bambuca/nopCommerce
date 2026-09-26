@@ -249,6 +249,17 @@ public class MemoryCacheManagerTests : BaseNopTest
     }
 
     [Test]
+    public async Task GetManyRejectsNullArguments()
+    {
+        static CacheKey keyOf(int id) => new($"many_null_{id}");
+        static Task<IDictionary<int, List<int>>> load(int[] _) => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>>());
+
+        await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(null, keyOf, load)).Should().ThrowAsync<ArgumentNullException>();
+        await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(new[] { 1 }, null, load)).Should().ThrowAsync<ArgumentNullException>();
+        await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(new[] { 1 }, keyOf, null)).Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Test]
     public async Task GetManySkipsItemsTheLoadDidNotReturnWhenThereIsNoFallback()
     {
         var result = await _staticCacheManager.GetManyAsync<int, List<int>>(new[] { 1 }, id => new CacheKey($"many_skip_{id}"),

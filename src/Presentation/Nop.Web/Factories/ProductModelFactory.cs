@@ -6,6 +6,7 @@ using Nop.Core;
 using Nop.Core.Caching;
 using Nop.Core.Domain.Catalog;
 using Nop.Core.Domain.Customers;
+using Nop.Core.Domain.Localization;
 using Nop.Core.Domain.Media;
 using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Security;
@@ -696,52 +697,114 @@ public partial class ProductModelFactory : IProductModelFactory
     {
         ArgumentNullException.ThrowIfNull(product);
 
-        var productName = await _localizationService.GetLocalizedAsync(product, x => x.Name);
         //If a size has been set in the view, we use it in priority
         var pictureSize = productThumbPictureSize ?? _mediaSettings.ProductThumbPictureSize;
 
         //prepare picture model
-        var cacheKey = _staticCacheManager.PrepareKeyForDefaultCache(NopModelCacheDefaults.ProductOverviewPicturesModelKey,
-            product, pictureSize, true, _catalogSettings.DisplayAllPicturesOnCatalogPages, await _workContext.GetWorkingLanguageAsync(),
-            _webHelper.IsCurrentConnectionSecured(), await _storeContext.GetCurrentStoreAsync());
+        var cacheKey = PrepareProductOverviewPicturesCacheKey(product, pictureSize,
+            await _workContext.GetWorkingLanguageAsync(), await _storeContext.GetCurrentStoreAsync());
 
         var cachedPictures = await _staticCacheManager.GetAsync(cacheKey, async () =>
         {
-            async Task<PictureModel> preparePictureModelAsync(Picture picture)
-            {
-                //we have to keep the url generation order "full size -> preview" because picture can be updated twice
-                //this section of code requires detailed analysis in the future
-                (var fullSizeImageUrl, picture) = await _pictureService.GetPictureUrlAsync(picture);
-                (var imageUrl, picture) = await _pictureService.GetPictureUrlAsync(picture, pictureSize);
-
-                return new PictureModel
-                {
-                    ImageUrl = imageUrl,
-                    FullSizeImageUrl = fullSizeImageUrl,
-                    //"title" attribute
-                    Title = (picture != null && !string.IsNullOrEmpty(picture.TitleAttribute))
-                        ? picture.TitleAttribute
-                        : string.Format(await _localizationService.GetResourceAsync("Media.Product.ImageLinkTitleFormat"),
-                            productName),
-                    //"alt" attribute
-                    AlternateText = (picture != null && !string.IsNullOrEmpty(picture.AltAttribute))
-                        ? picture.AltAttribute
-                        : string.Format(await _localizationService.GetResourceAsync("Media.Product.ImageAlternateTextFormat"),
-                            productName)
-                };
-            }
-
             //all pictures
-            var pictures = (await _pictureService
-                    .GetPicturesByProductIdAsync(product.Id, _catalogSettings.DisplayAllPicturesOnCatalogPages ? 0 : 1))
-                .DefaultIfEmpty(null);
-            var pictureModels = await pictures
-                .SelectAwait(async picture => await preparePictureModelAsync(picture))
-                .ToListAsync();
-            return pictureModels;
+            var pictures = await _pictureService
+                .GetPicturesByProductIdAsync(product.Id, _catalogSettings.DisplayAllPicturesOnCatalogPages ? 0 : 1);
+
+            return await PrepareProductOverviewPictureModelsAsync(product, pictureSize, pictures);
         });
 
         return cachedPictures;
+    }
+
+    /// <summary>
+    /// Prepare the cache key of the product overview picture models
+    /// </summary>
+    /// <param name="product">Product</param>
+    /// <param name="pictureSize">Product thumb picture size (longest side)</param>
+    /// <param name="language">Working language</param>
+    /// <param name="store">Current store</param>
+    /// <returns>Cache key</returns>
+    protected virtual CacheKey PrepareProductOverviewPicturesCacheKey(Product product, int pictureSize, Language language, Store store)
+    {
+        return _staticCacheManager.PrepareKeyForDefaultCache(NopModelCacheDefaults.ProductOverviewPicturesModelKey,
+            product, pictureSize, true, _catalogSettings.DisplayAllPicturesOnCatalogPages, language,
+            _webHelper.IsCurrentConnectionSecured(), store);
+    }
+
+    /// <summary>
+    /// Prepare the product overview picture models from the loaded product pictures
+    /// </summary>
+    /// <param name="product">Product</param>
+    /// <param name="pictureSize">Product thumb picture size (longest side)</param>
+    /// <param name="pictures">Product pictures; an empty list prepares the default picture model</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains picture models
+    /// </returns>
+    protected virtual async Task<List<PictureModel>> PrepareProductOverviewPictureModelsAsync(Product product, int pictureSize, IList<Picture> pictures)
+    {
+        var productName = await _localizationService.GetLocalizedAsync(product, x => x.Name);
+
+        async Task<PictureModel> preparePictureModelAsync(Picture picture)
+        {
+            //we have to keep the url generation order "full size -> preview" because picture can be updated twice
+            //this section of code requires detailed analysis in the future
+            (var fullSizeImageUrl, picture) = await _pictureService.GetPictureUrlAsync(picture);
+            (var imageUrl, picture) = await _pictureService.GetPictureUrlAsync(picture, pictureSize);
+
+            return new PictureModel
+            {
+                ImageUrl = imageUrl,
+                FullSizeImageUrl = fullSizeImageUrl,
+                //"title" attribute
+                Title = (picture != null && !string.IsNullOrEmpty(picture.TitleAttribute))
+                    ? picture.TitleAttribute
+                    : string.Format(await _localizationService.GetResourceAsync("Media.Product.ImageLinkTitleFormat"),
+                        productName),
+                //"alt" attribute
+                AlternateText = (picture != null && !string.IsNullOrEmpty(picture.AltAttribute))
+                    ? picture.AltAttribute
+                    : string.Format(await _localizationService.GetResourceAsync("Media.Product.ImageAlternateTextFormat"),
+                        productName)
+            };
+        }
+
+        return await pictures
+            .DefaultIfEmpty(null)
+            .SelectAwait(async picture => await preparePictureModelAsync(picture))
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Cache the overview picture models of products missing from the cache, loading their pictures with one query,
+    /// so <see cref="PrepareProductOverviewPicturesModelAsync"/> then serves each product from the cache
+    /// </summary>
+    /// <param name="products">Products</param>
+    /// <param name="productThumbPictureSize">Product thumb picture size (longest side); pass null to use the default value of media settings</param>
+    /// <returns>A task that represents the asynchronous operation</returns>
+    protected virtual async Task PrefetchProductOverviewPicturesModelsAsync(IList<Product> products, int? productThumbPictureSize = null)
+    {
+        var pictureSize = productThumbPictureSize ?? _mediaSettings.ProductThumbPictureSize;
+        var language = await _workContext.GetWorkingLanguageAsync();
+        var store = await _storeContext.GetCurrentStoreAsync();
+        var productsById = products.GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First());
+
+        await _staticCacheManager.GetManyAsync<int, List<PictureModel>>(productsById.Keys,
+            productId => PrepareProductOverviewPicturesCacheKey(productsById[productId], pictureSize, language, store),
+            async missingIds =>
+            {
+                var pictures = await _pictureService
+                    .GetPicturesByProductIdsAsync(missingIds, _catalogSettings.DisplayAllPicturesOnCatalogPages ? 0 : 1);
+
+                var models = new Dictionary<int, List<PictureModel>>();
+                foreach (var productId in missingIds)
+                {
+                    models[productId] = await PrepareProductOverviewPictureModelsAsync(productsById[productId], pictureSize,
+                        pictures.TryGetValue(productId, out var productPictures) ? productPictures : new List<Picture>());
+                }
+
+                return models;
+            });
     }
 
     /// <summary>
@@ -1378,13 +1441,18 @@ public partial class ProductModelFactory : IProductModelFactory
 
         var productList = products.ToList();
 
-        //price calculation asks for discounts and tier prices of every product separately; for a list,
+        //price calculation asks for discounts, tier prices and attribute mappings of every product separately; for a list,
         //load the ones missing from the caches with one query each, so the per-product calls are served from cache
         if (preparePriceModel && productList.Count > 1)
         {
             await _discountService.GetAppliedDiscountsAsync(productList);
             await _productService.GetTierPricesByProductsAsync(productList.Select(p => p.Id).ToArray());
+            await _productAttributeService.GetProductAttributeMappingsByProductIdsAsync(productList.Select(p => p.Id).ToArray());
         }
+
+        //the same for pictures: products missing from the picture model cache get their pictures with one query
+        if (preparePictureModel && productList.Count > 1)
+            await PrefetchProductOverviewPicturesModelsAsync(productList, productThumbPictureSize);
 
         var models = new List<ProductOverviewModel>();
 

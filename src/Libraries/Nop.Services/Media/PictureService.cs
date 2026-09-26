@@ -758,6 +758,38 @@ public partial class PictureService : IPictureService
     }
 
     /// <summary>
+    /// Gets pictures of several products with one query
+    /// </summary>
+    /// <param name="productIds">Product identifiers</param>
+    /// <param name="recordsToReturn">Number of records to return per product. 0 if you want to get all items</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the pictures by product identifier, in the same order as <see cref="GetPicturesByProductIdAsync"/> returns them; products without pictures are missing
+    /// </returns>
+    public virtual async Task<IDictionary<int, IList<Picture>>> GetPicturesByProductIdsAsync(int[] productIds, int recordsToReturn = 0)
+    {
+        ArgumentNullException.ThrowIfNull(productIds);
+
+        var ids = productIds.Where(id => id > 0).Distinct().ToArray();
+        if (!ids.Any())
+            return new Dictionary<int, IList<Picture>>();
+
+        var query = from p in _pictureRepository.Table
+                    join pp in _productPictureRepository.Table on p.Id equals pp.PictureId
+                    where ids.Contains(pp.ProductId)
+                    orderby pp.DisplayOrder, pp.Id
+                    select new { pp.ProductId, Picture = p };
+
+        //products have a few pictures each, so "records to return" is applied in memory
+        return (await query.ToListAsync())
+            .GroupBy(item => item.ProductId)
+            .ToDictionary(g => g.Key, g => (IList<Picture>)g
+                .Take(recordsToReturn > 0 ? recordsToReturn : int.MaxValue)
+                .Select(item => item.Picture)
+                .ToList());
+    }
+
+    /// <summary>
     /// Inserts a picture
     /// </summary>
     /// <param name="pictureBinary">The picture binary</param>

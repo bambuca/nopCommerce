@@ -206,6 +206,40 @@ public partial class ProductAttributeService : IProductAttributeService
     }
 
     /// <summary>
+    /// Gets product attribute mappings of several products; the ones missing from the cache are loaded with one query
+    /// </summary>
+    /// <param name="productIds">Product identifiers</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the product attribute mappings by product identifier
+    /// </returns>
+    public virtual async Task<IDictionary<int, IList<ProductAttributeMapping>>> GetProductAttributeMappingsByProductIdsAsync(int[] productIds)
+    {
+        ArgumentNullException.ThrowIfNull(productIds);
+
+        var ids = productIds.Where(id => id > 0).Distinct().ToArray();
+        var result = new Dictionary<int, IList<ProductAttributeMapping>>();
+        if (!ids.Any())
+            return result;
+
+        //the same key, order and value type (List<ProductAttributeMapping>) as GetProductAttributeMappingsByProductIdAsync caches
+        var mappings = await _staticCacheManager.GetManyAsync<int, List<ProductAttributeMapping>>(ids,
+            productId => _staticCacheManager.PrepareKeyForDefaultCache(NopCatalogDefaults.ProductAttributeMappingsByProductCacheKey, productId),
+            async missingIds => (await _productAttributeMappingRepository.Table
+                    .Where(pam => missingIds.Contains(pam.ProductId))
+                    .OrderBy(pam => pam.DisplayOrder).ThenBy(pam => pam.Id)
+                    .ToListAsync())
+                .GroupBy(pam => pam.ProductId)
+                .ToDictionary(g => g.Key, g => g.ToList()),
+            _ => new List<ProductAttributeMapping>());
+
+        foreach (var (productId, productMappings) in mappings)
+            result[productId] = productMappings;
+
+        return result;
+    }
+
+    /// <summary>
     /// Gets a product attribute mapping
     /// </summary>
     /// <param name="productAttributeMappingId">Product attribute mapping identifier</param>

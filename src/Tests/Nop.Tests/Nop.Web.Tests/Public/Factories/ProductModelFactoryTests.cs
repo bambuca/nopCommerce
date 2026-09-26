@@ -27,6 +27,7 @@ using Nop.Services.Tax;
 using Nop.Services.Vendors;
 using Nop.Web.Factories;
 using Nop.Web.Models.Catalog;
+using Nop.Web.Models.Media;
 using NUnit.Framework;
 
 namespace Nop.Tests.Nop.Web.Tests.Public.Factories;
@@ -92,6 +93,27 @@ public class ProductModelFactoryTests : WebTest
         var model = (await _productModelFactory.PrepareProductOverviewModelsAsync(new[] { product })).FirstOrDefault();
 
         PropertiesShouldEqual(product, model);
+    }
+
+    [Test]
+    public async Task ProductOverviewModelsOfListHaveTheSamePicturesAsOfSingleProducts()
+    {
+        var staticCacheManager = GetService<IStaticCacheManager>();
+        var products = await _productService.GetProductsByIdsAsync(Enumerable.Range(1, 12).ToArray());
+
+        //one product at a time: pictures are loaded per product
+        await staticCacheManager.ClearAsync();
+        var expected = new Dictionary<int, IList<PictureModel>>();
+        foreach (var product in products)
+            expected[product.Id] = (await _productModelFactory.PrepareProductOverviewModelsAsync(new[] { product })).Single().PictureModels;
+
+        //the whole list: pictures of the products missing from the cache are loaded with one query
+        await staticCacheManager.ClearAsync();
+        var models = await _productModelFactory.PrepareProductOverviewModelsAsync(products);
+
+        expected.Values.Should().Contain(pictures => pictures.Count > 0 && pictures[0].ImageUrl != null);
+        foreach (var model in models)
+            model.PictureModels.Should().BeEquivalentTo(expected[model.Id], options => options.WithStrictOrdering());
     }
 
     [Test]

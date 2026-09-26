@@ -17,6 +17,59 @@ public static class CachingExtensions
     }
 
     /// <summary>
+    /// Get cached items for several keys. The ones not in the cache yet are loaded with a single call and cached,
+    /// each under the same key and with the same type as the per-item method caches them, so both share the cache
+    /// </summary>
+    /// <typeparam name="TKey">Type of the item identifier</typeparam>
+    /// <typeparam name="T">Type of cached item; must match the type cached by the per-item method</typeparam>
+    /// <param name="cacheManager">Cache manager</param>
+    /// <param name="keys">Item identifiers</param>
+    /// <param name="prepareKey">Function to prepare the cache key of an item</param>
+    /// <param name="acquireMissing">Function to load the items that are not in the cache yet</param>
+    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the cached values by item identifier
+    /// </returns>
+    public static async Task<IDictionary<TKey, T>> GetManyAsync<TKey, T>(this IStaticCacheManager cacheManager,
+        IEnumerable<TKey> keys, Func<TKey, CacheKey> prepareKey,
+        Func<TKey[], Task<IDictionary<TKey, T>>> acquireMissing, Func<TKey, T> ifNotLoaded = null) where T : class
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+
+        var result = new Dictionary<TKey, T>();
+        var missing = new List<(TKey Key, CacheKey CacheKey)>();
+
+        foreach (var key in keys.Distinct())
+        {
+            var cacheKey = prepareKey(key);
+            var cached = await cacheManager.GetAsync(cacheKey, default(T));
+
+            if (cached != null)
+                result[key] = cached;
+            else
+                missing.Add((key, cacheKey));
+        }
+
+        if (!missing.Any())
+            return result;
+
+        var loaded = await acquireMissing(missing.Select(item => item.Key).ToArray());
+
+        foreach (var (key, cacheKey) in missing)
+        {
+            var value = loaded.TryGetValue(key, out var item) ? item : ifNotLoaded?.Invoke(key);
+            if (value == null)
+                continue;
+
+            //cache through the same "get or load" call the per-item method uses, so a value cached meanwhile wins
+            result[key] = await cacheManager.GetAsync<T>(cacheKey, () => value);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Remove items by cache key prefix
     /// </summary>
     /// <param name="cacheManager">Cache manager</param>

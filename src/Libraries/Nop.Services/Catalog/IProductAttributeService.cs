@@ -102,6 +102,16 @@ public partial interface IProductAttributeService
     Task<IList<ProductAttributeMapping>> GetProductAttributeMappingsByProductIdAsync(int productId);
 
     /// <summary>
+    /// Gets product attribute mappings of several products; the ones missing from the cache are loaded with one query
+    /// </summary>
+    /// <param name="productIds">Product identifiers</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the product attribute mappings by product identifier
+    /// </returns>
+    Task<IDictionary<int, IList<ProductAttributeMapping>>> GetProductAttributeMappingsByProductIdsAsync(int[] productIds);
+
+    /// <summary>
     /// Gets a product attribute mapping
     /// </summary>
     /// <param name="productAttributeMappingId">Product attribute mapping identifier</param>

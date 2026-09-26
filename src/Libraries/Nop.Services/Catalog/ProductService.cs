@@ -2141,20 +2141,18 @@ public partial class ProductService : IProductService
         if (!ids.Any())
             return result;
 
-        //one query for the whole batch, executed only when some product is missing from the cache
-        var byProduct = new Lazy<Task<Dictionary<int, List<TierPrice>>>>(async () =>
-            (await _tierPriceRepository.Table.Where(tp => ids.Contains(tp.ProductId)).ToListAsync())
-            .GroupBy(tp => tp.ProductId)
-            .ToDictionary(g => g.Key, g => g.ToList()));
+        //the same key and the same value type (List<TierPrice>) as GetTierPricesByProductAsync caches
+        //(MemoryCacheManager stores Lazy<Task<T>>, a value cached as IList<TierPrice> would not be found);
+        //products missing from the cache are loaded with one query
+        var tierPrices = await _staticCacheManager.GetManyAsync<int, List<TierPrice>>(ids,
+            productId => _staticCacheManager.PrepareKeyForDefaultCache(NopCatalogDefaults.TierPricesByProductCacheKey, productId),
+            async missingIds => (await _tierPriceRepository.Table.Where(tp => missingIds.Contains(tp.ProductId)).ToListAsync())
+                .GroupBy(tp => tp.ProductId)
+                .ToDictionary(g => g.Key, g => g.ToList()),
+            _ => new List<TierPrice>());
 
-        foreach (var productId in ids)
-        {
-            //the same key and the same value type (List<TierPrice>) as GetTierPricesByProductAsync caches
-            //(MemoryCacheManager stores Lazy<Task<T>>, a value cached as IList<TierPrice> would not be found)
-            result[productId] = await _staticCacheManager.GetAsync(
-                _staticCacheManager.PrepareKeyForDefaultCache(NopCatalogDefaults.TierPricesByProductCacheKey, productId),
-                async () => (await byProduct.Value).TryGetValue(productId, out var prices) ? prices : new List<TierPrice>());
-        }
+        foreach (var (productId, prices) in tierPrices)
+            result[productId] = prices;
 
         return result;
     }

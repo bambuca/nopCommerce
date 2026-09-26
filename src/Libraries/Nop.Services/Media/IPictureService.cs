@@ -131,6 +131,17 @@ public partial interface IPictureService
     Task<IList<Picture>> GetPicturesByProductIdAsync(int productId, int recordsToReturn = 0);
 
     /// <summary>
+    /// Gets pictures of several products with one query
+    /// </summary>
+    /// <param name="productIds">Product identifiers</param>
+    /// <param name="recordsToReturn">Number of records to return per product. 0 if you want to get all items</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the pictures by product identifier, in the same order as <see cref="GetPicturesByProductIdAsync"/> returns them; products without pictures are missing
+    /// </returns>
+    Task<IDictionary<int, IList<Picture>>> GetPicturesByProductIdsAsync(int[] productIds, int recordsToReturn = 0);
+
+    /// <summary>
     /// Inserts a picture
     /// </summary>
     /// <param name="pictureBinary">The picture binary</param>

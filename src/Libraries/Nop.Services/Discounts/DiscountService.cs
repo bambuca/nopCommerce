@@ -287,25 +287,30 @@ public partial class DiscountService : IDiscountService
             return result;
 
         var discountMappingRepository = EngineContext.Current.Resolve<IRepository<T>>();
-        var entityIds = entityList.Select(e => e.Id).ToArray();
 
-        //one query for the whole batch, executed only when some entity is missing from the cache
-        var byEntity = new Lazy<Task<Dictionary<int, List<Discount>>>>(async () =>
-            (await (from d in _discountRepository.Table
-                join ad in discountMappingRepository.Table on d.Id equals ad.DiscountId
-                where entityIds.Contains(ad.EntityId)
-                select new { ad.EntityId, Discount = d }).ToListAsync())
-            .GroupBy(x => x.EntityId)
-            .ToDictionary(g => g.Key, g => g.Select(x => x.Discount).ToList()));
+        //the same key and the same value type (List<Discount>) as a per-entity call would cache; entities missing
+        //from the cache are loaded with one query, and those without discounts are cached too (as empty lists),
+        //otherwise they would be queried again
+        var discounts = await _shortTermCacheManager.GetManyAsync<IDiscountSupported<T>, List<Discount>>(entityList,
+            NopDiscountDefaults.AppliedDiscountsCacheKey, entity => new object[] { entity.GetType().Name, entity },
+            async missingEntities =>
+            {
+                var missingIds = missingEntities.Select(e => e.Id).ToArray();
+                var byEntityId = (await (from d in _discountRepository.Table
+                        join ad in discountMappingRepository.Table on d.Id equals ad.DiscountId
+                        where missingIds.Contains(ad.EntityId)
+                        select new { ad.EntityId, Discount = d }).ToListAsync())
+                    .GroupBy(x => x.EntityId)
+                    .ToDictionary(g => g.Key, g => g.Select(x => x.Discount).ToList());
 
-        foreach (var entity in entityList)
-        {
-            //the same key and the same value type (List<Discount>) as a per-entity call would cache;
-            //entities without discounts are cached too, otherwise they would be queried again
-            result[entity.Id] = await _shortTermCacheManager.GetAsync(
-                async () => (await byEntity.Value).TryGetValue(entity.Id, out var discounts) ? discounts : new List<Discount>(),
-                NopDiscountDefaults.AppliedDiscountsCacheKey, entity.GetType().Name, entity);
-        }
+                return missingEntities
+                    .Where(e => byEntityId.ContainsKey(e.Id))
+                    .ToDictionary(e => e, e => byEntityId[e.Id]);
+            },
+            _ => new List<Discount>());
+
+        foreach (var (entity, entityDiscounts) in discounts)
+            result[entity.Id] = entityDiscounts;
 
         return result;
     }

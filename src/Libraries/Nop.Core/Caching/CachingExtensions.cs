@@ -73,6 +73,63 @@ public static class CachingExtensions
     }
 
     /// <summary>
+    /// Get items cached for the current request for several keys. The ones not in the cache yet are loaded with a single
+    /// call and cached, each under the same key and with the same type as the per-item method caches them, so both share
+    /// the cache. The cache itself is still read key by key; only the load of the missing items is batched
+    /// </summary>
+    /// <typeparam name="TKey">Type of the item identifier</typeparam>
+    /// <typeparam name="T">Type of cached item; must match the type cached by the per-item method</typeparam>
+    /// <param name="cacheManager">Short term cache manager</param>
+    /// <param name="keys">Item identifiers</param>
+    /// <param name="cacheKey">Initial cache key</param>
+    /// <param name="cacheKeyParameters">Function to get the parameters of the cache key of an item</param>
+    /// <param name="acquireMissing">Function to load the items that are not in the cache yet</param>
+    /// <param name="ifNotLoaded">Function to create the value cached for an item the load did not return; pass null to skip such items</param>
+    /// <returns>
+    /// A task that represents the asynchronous operation
+    /// The task result contains the cached values by item identifier
+    /// </returns>
+    public static async Task<IDictionary<TKey, T>> GetManyAsync<TKey, T>(this IShortTermCacheManager cacheManager,
+        IEnumerable<TKey> keys, CacheKey cacheKey, Func<TKey, object[]> cacheKeyParameters,
+        Func<TKey[], Task<IDictionary<TKey, T>>> acquireMissing, Func<TKey, T> ifNotLoaded = null) where T : class
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        ArgumentNullException.ThrowIfNull(cacheKey);
+        ArgumentNullException.ThrowIfNull(cacheKeyParameters);
+        ArgumentNullException.ThrowIfNull(acquireMissing);
+
+        var result = new Dictionary<TKey, T>();
+        var missing = new List<TKey>();
+
+        foreach (var key in keys.Distinct())
+        {
+            //the short term cache has no "try get"; an acquire returning null only reads, because null values are not cached
+            var cached = await cacheManager.GetAsync(() => Task.FromResult<T>(null), cacheKey, cacheKeyParameters(key));
+
+            if (cached != null)
+                result[key] = cached;
+            else
+                missing.Add(key);
+        }
+
+        if (!missing.Any())
+            return result;
+
+        var loaded = await acquireMissing(missing.ToArray());
+
+        foreach (var key in missing)
+        {
+            var value = loaded.TryGetValue(key, out var item) ? item : ifNotLoaded?.Invoke(key);
+            if (value == null)
+                continue;
+
+            result[key] = await cacheManager.GetAsync(() => Task.FromResult(value), cacheKey, cacheKeyParameters(key));
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Remove items by cache key prefix
     /// </summary>
     /// <param name="cacheManager">Cache manager</param>

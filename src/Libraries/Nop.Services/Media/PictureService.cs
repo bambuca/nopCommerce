@@ -771,7 +771,7 @@ public partial class PictureService : IPictureService
         ArgumentNullException.ThrowIfNull(productIds);
 
         var ids = productIds.Where(id => id > 0).Distinct().ToArray();
-        if (!ids.Any())
+        if (ids.Length == 0)
             return new Dictionary<int, IList<Picture>>();
 
         var query = from p in _pictureRepository.Table

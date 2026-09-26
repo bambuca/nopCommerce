@@ -776,6 +776,23 @@ public partial class ProductModelFactory : IProductModelFactory
     }
 
     /// <summary>
+    /// Cache the discounts, tier prices and attribute mappings the price models of products read, loading the ones
+    /// missing from the cache with one query each, so <see cref="PrepareProductPriceModelAsync"/> then serves each product from the cache
+    /// </summary>
+    /// <param name="products">Products</param>
+    /// <returns>A task that represents the asynchronous operation</returns>
+    protected virtual async Task PrefetchProductOverviewPriceDataAsync(IList<Product> products)
+    {
+        var productIds = products.Select(p => p.Id).ToArray();
+        await _discountService.GetAppliedDiscountsAsync(products);
+        await _productService.GetTierPricesByProductsAsync(productIds);
+
+        //attribute mappings are read only for "from" prices (see PrepareProductPriceModelAsync)
+        if (_catalogSettings.DisplayFromPrices)
+            await _productAttributeService.GetProductAttributeMappingsByProductIdsAsync(productIds);
+    }
+
+    /// <summary>
     /// Cache the overview picture models of products missing from the cache, loading their pictures with one query,
     /// so <see cref="PrepareProductOverviewPicturesModelAsync"/> then serves each product from the cache
     /// </summary>
@@ -1444,15 +1461,7 @@ public partial class ProductModelFactory : IProductModelFactory
         //price calculation asks for discounts, tier prices and attribute mappings of every product separately; for a list,
         //load the ones missing from the caches with one query each, so the per-product calls are served from cache
         if (preparePriceModel && productList.Count > 1)
-        {
-            var productIds = productList.Select(p => p.Id).ToArray();
-            await _discountService.GetAppliedDiscountsAsync(productList);
-            await _productService.GetTierPricesByProductsAsync(productIds);
-
-            //attribute mappings are read only for "from" prices (see PrepareProductPriceModelAsync)
-            if (_catalogSettings.DisplayFromPrices)
-                await _productAttributeService.GetProductAttributeMappingsByProductIdsAsync(productIds);
-        }
+            await PrefetchProductOverviewPriceDataAsync(productList);
 
         //the same for pictures: products missing from the picture model cache get their pictures with one query
         if (preparePictureModel && productList.Count > 1)

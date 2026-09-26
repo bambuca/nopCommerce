@@ -219,7 +219,7 @@ public partial class ProductAttributeService : IProductAttributeService
 
         var ids = productIds.Where(id => id > 0).Distinct().ToArray();
         var result = new Dictionary<int, IList<ProductAttributeMapping>>();
-        if (!ids.Any())
+        if (ids.Length == 0)
             return result;
 
         //the same key, order and value type (List<ProductAttributeMapping>) as GetProductAttributeMappingsByProductIdAsync caches

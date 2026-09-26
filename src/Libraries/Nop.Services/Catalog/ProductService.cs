@@ -2141,9 +2141,9 @@ public partial class ProductService : IProductService
         if (!ids.Any())
             return result;
 
-        //the same key and the same value type (List<TierPrice>) as GetTierPricesByProductAsync caches
-        //(MemoryCacheManager stores Lazy<Task<T>>, a value cached as IList<TierPrice> would not be found);
-        //products missing from the cache are loaded with one query
+        //the same key and the same value type (List<TierPrice>) as GetTierPricesByProductAsync caches, because
+        //MemoryCacheManager stores Lazy<Task<T>> and would not find a value cached as IList<TierPrice>.
+        //Products missing from the cache are loaded with one query
         var tierPrices = await _staticCacheManager.GetManyAsync<int, List<TierPrice>>(ids,
             productId => _staticCacheManager.PrepareKeyForDefaultCache(NopCatalogDefaults.TierPricesByProductCacheKey, productId),
             async missingIds => (await _tierPriceRepository.Table.Where(tp => missingIds.Contains(tp.ProductId)).ToListAsync())

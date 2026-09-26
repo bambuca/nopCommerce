@@ -7,6 +7,9 @@ namespace Nop.Tests.Nop.Core.Tests.Caching;
 [TestFixture]
 public class MemoryCacheManagerTests : BaseNopTest
 {
+    private static readonly int[] _manyKeys = { 1, 2, 3, 2 };
+    private static readonly int[] _oneKey = { 1 };
+
     private MemoryCacheManager _staticCacheManager;
 
     [OneTimeSetUp]
@@ -218,7 +221,7 @@ public class MemoryCacheManagerTests : BaseNopTest
         await _staticCacheManager.SetAsync(keyOf(1), cached);
         var calls = new List<int[]>();
 
-        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(new[] { 1, 2, 3, 2 }, keyOf,
+        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(_manyKeys, keyOf,
             missing =>
             {
                 calls.Add(missing);
@@ -242,7 +245,7 @@ public class MemoryCacheManagerTests : BaseNopTest
     {
         await _staticCacheManager.SetAsync(new CacheKey("many_cached_1"), new List<int> { 1 });
 
-        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(new[] { 1 }, id => new CacheKey($"many_cached_{id}"),
+        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(_oneKey, id => new CacheKey($"many_cached_{id}"),
             _ => throw new InvalidOperationException("nothing should be loaded"));
 
         result[1].Should().Equal(1);
@@ -255,14 +258,14 @@ public class MemoryCacheManagerTests : BaseNopTest
         static Task<IDictionary<int, List<int>>> load(int[] _) => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>>());
 
         await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(null, keyOf, load)).Should().ThrowAsync<ArgumentNullException>();
-        await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(new[] { 1 }, null, load)).Should().ThrowAsync<ArgumentNullException>();
-        await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(new[] { 1 }, keyOf, null)).Should().ThrowAsync<ArgumentNullException>();
+        await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(_oneKey, null, load)).Should().ThrowAsync<ArgumentNullException>();
+        await _staticCacheManager.Invoking(c => c.GetManyAsync<int, List<int>>(_oneKey, keyOf, null)).Should().ThrowAsync<ArgumentNullException>();
     }
 
     [Test]
     public async Task GetManySkipsItemsTheLoadDidNotReturnWhenThereIsNoFallback()
     {
-        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(new[] { 1 }, id => new CacheKey($"many_skip_{id}"),
+        var result = await _staticCacheManager.GetManyAsync<int, List<int>>(_oneKey, id => new CacheKey($"many_skip_{id}"),
             _ => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>>()));
 
         result.Should().BeEmpty();

@@ -28,7 +28,7 @@ public class PictureServiceBatchTests : ServiceTest
         {
             var single = (await _pictureService.GetPicturesByProductIdAsync(productId)).Select(p => p.Id).ToList();
 
-            if (single.Any())
+            if (single.Count > 0)
                 byProduct[productId].Select(p => p.Id).Should().Equal(single, "the order is the same as of the per-product call");
             else
                 byProduct.Should().NotContainKey(productId, "products without pictures are missing");

@@ -9,8 +9,11 @@ namespace Nop.Tests.Nop.Core.Tests.Caching;
 [TestFixture]
 public class PerRequestCacheManagerTests : BaseNopTest
 {
+    private static readonly int[] _manyKeys = { 1, 2, 3, 2 };
+    private static readonly int[] _oneKey = { 1 };
+
     private CacheKey _cacheKey;
-    private IShortTermCacheManager _shortTermCacheManager;
+    private PerRequestCacheManager _shortTermCacheManager;
 
     [SetUp]
     public void SetUp()
@@ -29,7 +32,7 @@ public class PerRequestCacheManagerTests : BaseNopTest
         var cached = await _shortTermCacheManager.GetAsync(() => Task.FromResult(new List<int> { 1 }), _cacheKey, 1);
         var calls = new List<int[]>();
 
-        var result = await _shortTermCacheManager.GetManyAsync<int, List<int>>(new[] { 1, 2, 3, 2 }, _cacheKey, KeyParameters,
+        var result = await _shortTermCacheManager.GetManyAsync<int, List<int>>(_manyKeys, _cacheKey, KeyParameters,
             missing =>
             {
                 calls.Add(missing);
@@ -49,7 +52,7 @@ public class PerRequestCacheManagerTests : BaseNopTest
     [Test]
     public async Task GetManySkipsItemsTheLoadDidNotReturnWhenThereIsNoFallback()
     {
-        var result = await _shortTermCacheManager.GetManyAsync<int, List<int>>(new[] { 1 }, _cacheKey, KeyParameters,
+        var result = await _shortTermCacheManager.GetManyAsync<int, List<int>>(_oneKey, _cacheKey, KeyParameters,
             _ => Task.FromResult<IDictionary<int, List<int>>>(new Dictionary<int, List<int>>()));
 
         result.Should().BeEmpty();

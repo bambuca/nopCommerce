@@ -41,15 +41,15 @@ public partial class ThumbService : IThumbService
     /// </summary>
     /// <param name="picture">Picture</param>
     /// <returns>A task that represents the asynchronous operation</returns>
-    public virtual async Task DeletePictureThumbsAsync(Picture picture)
+    public virtual Task DeletePictureThumbsAsync(Picture picture)
     {
         var filter = $"{picture.Id:0000000}*.*";
         var currentFiles = _fileProvider.GetFiles(_fileProvider.Combine(_fileProvider.GetLocalImagesPath(_mediaSettings), NopMediaDefaults.ImageThumbsPath), filter, false);
-        foreach (var currentFileName in currentFiles)
-        {
-            var thumbFilePath = await GetThumbLocalPathByFileNameAsync(currentFileName);
+        //GetFiles returns full paths, so don't combine them with the thumbs directory again
+        foreach (var thumbFilePath in currentFiles)
             _fileProvider.DeleteFile(thumbFilePath);
-        }
+
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -166,45 +166,44 @@ public partial class ThumbService : IThumbService
     /// A task that represents the asynchronous operation
     /// The task result contains the thumbs file count and size
     /// </returns>
-    public virtual async Task<(int filesCount, long filesSize)> GetThumbsInfoAsync()
+    public virtual Task<(int filesCount, long filesSize)> GetThumbsInfoAsync()
     {
         var filesCount = 0;
         var filesSize = 0L;
         var currentFiles = _fileProvider.GetFiles(_fileProvider.Combine(_fileProvider.GetLocalImagesPath(_mediaSettings), NopMediaDefaults.ImageThumbsPath), topDirectoryOnly: false);
         
-        foreach (var currentFileName in currentFiles)
+        foreach (var thumbFilePath in currentFiles)
         {
-            if (currentFileName.EndsWith("placeholder.txt"))
+            if (thumbFilePath.EndsWith("placeholder.txt"))
                 continue;
 
             filesCount++;
-
-            var thumbFilePath = await GetThumbLocalPathByFileNameAsync(currentFileName);
             filesSize += _fileProvider.FileLength(thumbFilePath);
         }
 
-        return (filesCount, filesSize);
+        return Task.FromResult((filesCount, filesSize));
     }
 
     /// <summary>
     /// Delete all thumbs
     /// </summary>
     /// <returns>A task that represents the asynchronous operation</returns>
-    public virtual async Task DeleteAllThumbsAsync()
+    public virtual Task DeleteAllThumbsAsync()
     {
         var currentFiles = _fileProvider.GetFiles(_fileProvider.Combine(_fileProvider.GetLocalImagesPath(_mediaSettings), NopMediaDefaults.ImageThumbsPath), topDirectoryOnly: false);
 
-        foreach (var currentFileName in currentFiles)
+        foreach (var thumbFilePath in currentFiles)
         {
-            if (currentFileName.EndsWith("placeholder.txt"))
+            if (thumbFilePath.EndsWith("placeholder.txt"))
                 continue;
 
-            var thumbFilePath = await GetThumbLocalPathByFileNameAsync(currentFileName);
             _fileProvider.DeleteFile(thumbFilePath);
         }
 
         foreach (var directory in _fileProvider.GetDirectories(_fileProvider.Combine(_fileProvider.GetLocalImagesPath(_mediaSettings), NopMediaDefaults.ImageThumbsPath)))
             _fileProvider.DeleteDirectory(directory);
+
+        return Task.CompletedTask;
     }
 
     #endregion

@@ -1,5 +1,4 @@
-﻿using System.Net;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.Routing;
@@ -53,8 +52,10 @@ public partial class NopRedirectResultExecutor : RedirectResultExecutor
         if (_securitySettings.AllowNonAsciiCharactersInHeaders)
         {
             //passed redirect URL may contain non-ASCII characters, that are not allowed now (see https://github.com/aspnet/KestrelHttpServer/issues/1144)
-            //so we force to encode this URL before processing
-            var url = WebUtility.UrlDecode(result.Url);
+            //so we force to encode this URL before processing: Uri below percent-encodes them and keeps existing escapes.
+            //The URL is not decoded first - that would turn an encoded %26 or %23 in the query into a separator,
+            //so a search for "a&b #c" would be redirected to ?q=a&b and the rest dropped as a fragment
+            var url = result.Url;
             var isLocalUrl = _webHelper.CheckIsLocalUrl(url);
 
             var uriStr = url;

@@ -54,7 +54,14 @@ public static class LocalizedUrlExtensions
     public static string RemoveApplicationPathFromRawUrl(this string rawUrl, PathString pathBase)
     {
         new PathString(rawUrl).StartsWithSegments(pathBase, out var result);
-        return WebUtility.UrlDecode(result);
+
+        //decode only the path: decoding the query would turn an encoded %26 or %23 into a separator,
+        //so the redirect adding the language code would send a search for "a&b #c" to ?q=a&b
+        var url = result.Value ?? string.Empty;
+        var queryStart = url.IndexOf('?');
+        return queryStart < 0
+            ? WebUtility.UrlDecode(url)
+            : WebUtility.UrlDecode(url[..queryStart]) + url[queryStart..];
     }
 
     /// <summary>
